@@ -1,0 +1,7 @@
+# Ignore private keys and PKCS#12 bundles
+*.key
+*.p12
+*.pfx
+
+# Ignore temporary files
+.DS_Store
