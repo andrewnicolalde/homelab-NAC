@@ -136,3 +136,15 @@ Expected: `Verify return code: 0 (ok)`, TLS connection established.
 * Upload `root_ca.crt`, `unifi-ap.crt`, and `unifi-ap.key`.
 * Point to `<PI_IP>:2083`.
 * Watch FreeRADIUS logs to see the UniFi APs establish their RADSec TLS connection.
+
+---
+
+## Future Architecture: Dynamic Authorization (CoA / Disconnect Messages)
+
+* **Objective:** Implement RFC 5176 / RFC 3576 Dynamic Authorization to enable Change of Authorization (CoA) and Disconnect Messages (DM).
+* **Use Case:** Force-disconnecting client devices mid-session or dynamically switching authorization policies/VLANs (e.g., upon certificate revocation, security posture failure, or administrative action) without waiting for session expiry or AP re-authentication.
+* **Firewall & Protocol Considerations:**
+  * **Traditional UDP RADIUS:** Requires the FreeRADIUS server to initiate outbound UDP requests to authenticators (APs/switches) on port `3799`.
+  * **RADSec Architecture (Recommended):** Under RFC 6614, CoA and Disconnect messages can be reverse-tunneled through the established persistent TLS connection (TCP `2083`) initiated by the UniFi APs. This preserves strict stateful firewall isolation without requiring inbound firewall pinholes into the management network.
+  * **Firewall Policy:** Maintain strict stateful filtering (Management `10.1.0.0/24` ➔ Kubernetes `10.50.0.100`, with reply tracking via `ESTABLISHED,RELATED`).
+
