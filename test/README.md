@@ -35,7 +35,7 @@ This directory provides an automated, containerized test harness using `eapol_te
    ```text
    client workstation_test {
        ipaddr = 10.10.10.69/32
-       secret = 'REPLACE_WITH_TEST_SECRET_64_CHAR'
+       secret = 'REPLACE_WITH_STRONG_48_CHAR_SECRET'
        require_message_authenticator = yes
        nas_type = other
    }

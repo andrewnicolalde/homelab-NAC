@@ -12,7 +12,7 @@ CERTS_DIR="${REPO_ROOT}/certificate-authority"
 # Target FreeRADIUS NodePort settings (default to Pi node IP and NodePort 31812)
 RADIUS_SERVER="${1:-10.50.0.100}"
 RADIUS_PORT="${2:-31812}"
-RADIUS_SECRET="${3:-REPLACE_WITH_TEST_SECRET_64_CHAR}"
+RADIUS_SECRET="${3:-REPLACE_WITH_STRONG_48_CHAR_SECRET}"
 CONFIG_FILE="${4:-eapol_test.conf}"
 
 IMAGE_NAME="eapol-test:local"
