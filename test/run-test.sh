@@ -89,23 +89,24 @@ else
 fi
 
 # Check RFC 3580 Dynamic VLAN assignment (VLAN 80)
-if echo "${TEST_OUTPUT}" | grep -Eq "Tunnel-Private-Group-Id.*['\"]?80['\"]?"; then
-    echo "✔ Dynamic VLAN Assignment: PASSED (Assigned to VLAN 80)"
+# eapol_test prints attribute on one line and hex value on the next (0x3830 = ASCII "80")
+if echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Private-Group-Id" | grep -qiE "(3830|80)"; then
+    echo "✔ Dynamic VLAN Assignment: PASSED (Assigned to VLAN 80 [hex: 3830])"
 else
     echo "❌ Dynamic VLAN Assignment: FAILED (VLAN 80 attribute not received)"
     SUCCESS=false
 fi
 
-# Check Tunnel Type (VLAN / 13)
-if echo "${TEST_OUTPUT}" | grep -Eq "Tunnel-Type.*(13|VLAN)"; then
-    echo "✔ Tunnel-Type: PASSED (VLAN / 13)"
+# Check Tunnel Type (VLAN / 13 -> 0x0000000d)
+if echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Type" | grep -qiE "(0000000d|13|VLAN)"; then
+    echo "✔ Tunnel-Type: PASSED (VLAN [hex: 0000000d / 13])"
 else
     echo "⚠️ Tunnel-Type: Attribute not detected in response"
 fi
 
-# Check Tunnel Medium Type (IEEE-802 / 6)
-if echo "${TEST_OUTPUT}" | grep -Eq "Tunnel-Medium-Type.*(6|IEEE-802)"; then
-    echo "✔ Tunnel-Medium-Type: PASSED (IEEE-802 / 6)"
+# Check Tunnel Medium Type (IEEE-802 / 6 -> 0x00000006)
+if echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Medium-Type" | grep -qiE "(00000006|IEEE-802)"; then
+    echo "✔ Tunnel-Medium-Type: PASSED (IEEE-802 [hex: 00000006 / 6])"
 else
     echo "⚠️ Tunnel-Medium-Type: Attribute not detected in response"
 fi
