@@ -71,3 +71,62 @@ In a separate terminal window, monitor FreeRADIUS debugging logs:
 ```bash
 kubectl logs -n freeradius-experimentation -l app=freeradius -f
 ```
+
+---
+
+## Over-the-Air Physical Wi-Fi Verification (CNSA 1.0 Proof)
+
+To verify with 100% certainty that the physical Access Point and client are operating in **strict WPA3-Enterprise 192-bit (CNSA 1.0 / Suite B)** mode:
+
+### 1. Local Client Verification (macOS)
+Inspect the active interface status without `sudo`:
+
+```bash
+ipconfig getsummary en0 | grep -i security
+```
+
+Output:
+```text
+  Security : SHA384_8021X
+```
+*(In macOS networking, `SHA384_8021X` corresponds directly to IEEE 802.11 AKM 12: 802.1X with SHA-384).*
+
+### 2. Over-the-Air RSN Information Element Proof
+Capturing raw 802.11 beacon frames off the airwaves (e.g. using macOS Wireless Diagnostics Sniffer or an AP capture) and dissecting the IEEE 802.11 RSN Information Element via `tshark`:
+
+```bash
+andrew@client-device-01 Developer/talos-k8s-cluster » /Applications/Wireshark.app/Contents/MacOS/tshark \
+  -r ~/Desktop/client-device-01_ch36_2026-09-06_22.41.07.961.pcap \
+  -Y "wlan.rsn.akms.type == 12" -V | grep -A 22 "Tag: RSN Information" | head -n 23
+
+        Tag: RSN Information
+            Tag Number: RSN Information (48)
+            Tag length: 26
+            RSN Version: 1
+            Group Cipher Suite: 00:0f:ac (Ieee 802.11) GCMP (256)
+                Group Cipher Suite OUI: 00:0f:ac (Ieee 802.11)
+                Group Cipher Suite type: GCMP (256) (9)
+            Pairwise Cipher Suite Count: 1
+            Pairwise Cipher Suite List 00:0f:ac (Ieee 802.11) GCMP (256)
+                Pairwise Cipher Suite: 00:0f:ac (Ieee 802.11) GCMP (256)
+                    Pairwise Cipher Suite OUI: 00:0f:ac (Ieee 802.11)
+                    Pairwise Cipher Suite type: GCMP (256) (9)
+            Auth Key Management (AKM) Suite Count: 1
+            Auth Key Management (AKM) List 00:0f:ac (Ieee 802.11) WPA (SHA384-SuiteB)
+                Auth Key Management (AKM) Suite: 00:0f:ac (Ieee 802.11) WPA (SHA384-SuiteB)
+                    Auth Key Management (AKM) OUI: 00:0f:ac (Ieee 802.11)
+                    Auth Key Management (AKM) type: WPA (SHA384-SuiteB) (12)
+            RSN Capabilities: 0x00c0
+                .... .... .... ...0 = RSN Pre-Auth capabilities: Transmitter does not support pre-authentication
+                .... .... .... ..0. = RSN No Pairwise capabilities: Transmitter can support WEP default key 0 simultaneously with Pairwise key
+                .... .... .... 00.. = RSN PTKSA Replay Counter capabilities: 1 replay counter per PTKSA/GTKSA/STAKeySA (0x0)
+                .... .... ..00 .... = RSN GTKSA Replay Counter capabilities: 1 replay counter per PTKSA/GTKSA/STAKeySA (0x0)
+                .... .... .1.. .... = Management Frame Protection Required: Required
+```
+
+#### What This Confirms:
+* **AKM Suite (`00:0f:ac:12`):** `Auth Key Management (AKM) type: WPA (SHA384-SuiteB) (12)`.
+* **Data Encryption (`00:0f:ac:9`):** Both Pairwise and Group ciphers are strictly `GCMP (256)`.
+* **Strict Non-Transition Mode:** Suite counts are `1`, guaranteeing no fallback to CCMP-128 or legacy AKMs is permitted.
+* **Management Frame Protection:** `Management Frame Protection Required: Required` (mandatory PMF).
+
