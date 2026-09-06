@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: freeradius
+  namespace: freeradius-experimentation
+  labels:
+    app: freeradius
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: freeradius
+  ports:
+    - name: radsec
+      port: 2083
+      targetPort: 2083
+      nodePort: 32083
+      protocol: TCP
+    - name: radius-auth
+      port: 1812
+      targetPort: 1812
+      nodePort: 31812
+      protocol: UDP
+    - name: radius-acct
+      port: 1813
+      targetPort: 1813
+      nodePort: 31813
+      protocol: UDP

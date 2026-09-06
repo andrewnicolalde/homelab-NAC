@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: freeradius-experimentation
+
+resources:
+  - k8s/00-namespace.yaml
+  - k8s/01-deployment-test.yaml
+  - k8s/02-service.yaml
+
+secretGenerator:
+  - name: freeradius-certs
+    files:
+      - ca.crt=./certificate-authority/root_ca.crt
+      - server.crt=./certificate-authority/server.crt
+      - server.key=./certificate-authority/server.key
+      - ca.pem=./certificate-authority/root_ca.crt
+      - server.pem=./certificate-authority/server.pem

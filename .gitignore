@@ -2,6 +2,7 @@
 *.key
 *.p12
 *.pfx
+*.pem
 
 # Ignore temporary files
 .DS_Store

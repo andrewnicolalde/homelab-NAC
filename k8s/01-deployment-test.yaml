@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: freeradius-test
+  namespace: freeradius-experimentation
+  labels:
+    app: freeradius
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: freeradius
+  template:
+    metadata:
+      labels:
+        app: freeradius
+    spec:
+      imagePullSecrets:
+        - name: ghcr-auth
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: freeradius
+          image: ghcr.io/andrewnicolalde/homelab-nacl/freeradius:latest
+          args: ["-X"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: radsec
+              containerPort: 2083
+              protocol: TCP
+            - name: radius-auth
+              containerPort: 1812
+              protocol: UDP
+            - name: radius-acct
+              containerPort: 1813
+              protocol: UDP
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/raddb/certs
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: freeradius-certs
+            defaultMode: 0440
