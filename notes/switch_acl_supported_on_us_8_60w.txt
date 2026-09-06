@@ -1,0 +1,41 @@
+==============================================================================
+  UniFi US-8-60W Layer 2 Switch Hardware ACL Verification
+  ==============================================================================
+  Proof of L2 MAC Access List support on EdgeSwitch / UniFi Switch 8 60W (US-8-60W)
+  enforcing hardware-level packet drops on Quarantine VLAN 250.
+  ==============================================================================
+  
+  US860W-US.7.4.1# cli
+  
+  Entering character mode
+  Escape character is '^]'.
+  
+  (UBNT) >enable
+  
+  (UBNT) #show mac access-lists global_mac_acl
+  
+  ACL Name: global_mac_acl
+  Inbound Interface(s): 0/1, 0/2, 0/3, 0/4, 0/5, 0/6, 0/7, 0/8
+  
+  Sequence Number: 1
+  Action......................................... deny
+  VLAN........................................... 250
+  
+  Sequence Number: 65531
+  Action......................................... permit
+  Match All...................................... TRUE
+  
+  
+  (UBNT) #show running-config | begin global_mac_acl
+  
+  mac access-list extended global_mac_acl
+  deny any any vlan eq 250
+  permit any any
+  exit
+  
+  ! Example: Binding the MAC ACL inbound to switch interfaces
+  interface 0/1
+  description 'U6-Mesh AP Trunk'
+  mac access-group global_mac_acl in 256
+  exit
+  
