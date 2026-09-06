@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Certificate Generation Script for 802.1X / EAP-TLS using Smallstep CLI (`step`)
+# Configured for WPA3-Enterprise 192-bit (CNSA / Suite B) Mode (NIST P-384 / SHA-384)
 # ==============================================================================
 # You can execute this entire script or copy-paste each command individually
 # into your shell to inspect the output at each step.
 #
 # Certificates created:
-#   1. Root CA (root_ca.crt / root_ca.key) - valid 10 years
-#   2. FreeRADIUS Server Cert (server.crt / server.key) - valid 1 year
-#   3. UniFi AP Authenticator Cert (unifi-ap.crt / unifi-ap.key) - valid 1 year
-#   4. Client Identity Cert (client.crt / client.key) - valid 1 year
+#   1. Root CA (root_ca.crt / root_ca.key) - valid 10 years (P-384)
+#   2. FreeRADIUS Server Cert (server.crt / server.key) - valid 1 year (P-384)
+#   3. UniFi AP Authenticator Cert (unifi-ap.crt / unifi-ap.key) - valid 1 year (P-384)
+#   4. Client Identity Cert (client.crt / client.key) - valid 1 year (P-384)
 #   5. Client PKCS#12 Bundle (client.p12) - for importing into macOS/iOS/Windows
 # ==============================================================================
 
@@ -21,20 +22,23 @@ cd "${SCRIPT_DIR}"
 
 echo "Working directory: ${SCRIPT_DIR}"
 
+# Elliptic Curve: WPA3-Enterprise 192-bit (CNSA) mandates NIST P-384 (ECDSA-SHA384)
+CURVE="P-384"
+
 # ------------------------------------------------------------------------------
 # 1. Create the Root Certificate Authority (Root CA)
 # ------------------------------------------------------------------------------
 # - Profile 'root-ca' automatically configures X.509 v3 basicConstraints (CA:TRUE)
 #   and appropriate keyCertSign/crlSign key usages.
-# - Defaults to modern Elliptic Curve (ECDSA P-256).
+# - Uses NIST P-384 curve with SHA-384.
 # - '--not-after=87600h' sets validity to ~10 years.
 # - '--no-password --insecure' creates the private key unencrypted.
-#   (Remove those two flags if you prefer to password-protect your root private key)
 # ------------------------------------------------------------------------------
 if [ ! -f "root_ca.crt" ]; then
-    echo "==> Creating Root CA..."
+    echo "==> Creating Root CA (${CURVE})..."
     step certificate create "Homelab Root CA" root_ca.crt root_ca.key \
         --profile root-ca \
+        --kty EC --curve "${CURVE}" \
         --not-after=87600h \
         --no-password --insecure
     echo "✔ Root CA created: root_ca.crt, root_ca.key"
@@ -73,6 +77,7 @@ if [ ! -f "server.crt" ]; then
         --profile leaf \
         --ca root_ca.crt \
         --ca-key root_ca.key \
+        --kty EC --curve "${CURVE}" \
         "${SERVER_SAN_ARGS[@]}" \
         --not-after=8760h \
         --no-password --insecure
@@ -111,6 +116,7 @@ if [ ! -f "unifi-ap.crt" ]; then
         --profile leaf \
         --ca root_ca.crt \
         --ca-key root_ca.key \
+        --kty EC --curve "${CURVE}" \
         --not-after=8760h \
         --no-password --insecure
     echo "✔ UniFi AP cert created: unifi-ap.crt, unifi-ap.key"
@@ -134,6 +140,7 @@ if [ ! -f "client.crt" ]; then
         --profile leaf \
         --ca root_ca.crt \
         --ca-key root_ca.key \
+        --kty EC --curve "${CURVE}" \
         --not-after=8760h \
         --no-password --insecure
     echo "✔ Client cert created: client.crt, client.key"

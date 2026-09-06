@@ -1,0 +1,59 @@
+# ==============================================================================
+# FreeRADIUS EAP Module Configuration (mods-available/eap)
+# Configured for EAP-TLS Authentication using Smallstep PKI certificates
+# ==============================================================================
+eap {
+    # Default to TLS for certificate-based 802.1X
+    default_eap_type = tls
+
+    # EAP session expiration timeout
+    timer_expire = 60
+
+    # Reject unsupported/unknown EAP types
+    ignore_unknown_eap_types = no
+
+    max_sessions = ${max_requests}
+
+    # --------------------------------------------------------------------------
+    # Common TLS Configuration
+    # --------------------------------------------------------------------------
+    tls-config tls-common {
+        # Server certificate and private key from Kubernetes Secret
+        private_key_file = /etc/raddb/certs/server.pem
+        certificate_file = /etc/raddb/certs/server.pem
+
+        # Trusted Root CA for validating client identity certificates
+        ca_file = /etc/raddb/certs/ca.pem
+
+        # NOTE: ca_path is intentionally omitted to avoid directory permission checks
+        
+        # Enforce WPA3-Enterprise 192-bit (CNSA / Suite B) cipher suite
+        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384"
+        cipher_server_preference = yes
+
+        # Ephemeral ECDH curve (NIST P-384 / secp384r1)
+        ecdh_curve = "secp384r1"
+
+        # Supported TLS versions (capped at 1.2 per WPA3 192-bit CNSA specification)
+        tls_min_version = "1.2"
+        tls_max_version = "1.2"
+
+        # Explicitly disable session resumption caching for strict zero-trust security
+        cache {
+            enable = no
+            # lifetime = 24 # hours
+            # store {
+            #     Tunnel-Private-Group-Id
+            #     Tunnel-Type
+            #     Tunnel-Medium-Type
+            # }
+        }
+    }
+
+    # --------------------------------------------------------------------------
+    # EAP-TLS Submodule
+    # --------------------------------------------------------------------------
+    tls {
+        tls = tls-common
+    }
+}

@@ -1,0 +1,18 @@
+# ==============================================================================
+# FreeRADIUS Authorization & Dynamic VLAN Mapping (mods-config/files/authorize)
+# ==============================================================================
+# When a client connects via 802.1X EAP-TLS, the 'files' module checks this
+# configuration to match the supplicant's identity and return authorization
+# attributes (VLAN assignment).
+#
+# Standard RFC 3580 (IEEE 802.1X RADIUS Usage Guidelines) VLAN Attributes:
+#   1. Tunnel-Type = VLAN (13)
+#   2. Tunnel-Medium-Type = IEEE-802 (6)
+#   3. Tunnel-Private-Group-Id = "<VLAN_ID>"
+# ==============================================================================
+
+# Device: client-device-01 (Client Certificate CN: client-device-01) -> VLAN 80
+client-device-01
+    Tunnel-Type = VLAN,
+    Tunnel-Medium-Type = IEEE-802,
+    Tunnel-Private-Group-Id = "80"

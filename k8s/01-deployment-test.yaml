@@ -64,8 +64,24 @@ spec:
               mountPath: /etc/raddb/certs/server.pem
               subPath: server.pem
               readOnly: true
+            - name: config
+              mountPath: /etc/raddb/clients.conf
+              subPath: clients.conf
+              readOnly: true
+            - name: config
+              mountPath: /etc/raddb/mods-enabled/eap
+              subPath: eap
+              readOnly: true
+            - name: config
+              mountPath: /etc/raddb/mods-config/files/authorize
+              subPath: authorize
+              readOnly: true
       volumes:
         - name: certs
           secret:
             secretName: freeradius-certs
+            defaultMode: 0440
+        - name: config
+          configMap:
+            name: freeradius-config
             defaultMode: 0440

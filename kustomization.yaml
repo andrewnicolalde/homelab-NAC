@@ -14,5 +14,13 @@ secretGenerator:
       - ca.crt=./certificate-authority/root_ca.crt
       - server.crt=./certificate-authority/server.crt
       - server.key=./certificate-authority/server.key
-      - ca.pem=./certificate-authority/root_ca.crt
+      - ca.pem=./certificate-authority/ca.pem
       - server.pem=./certificate-authority/server.pem
+
+configMapGenerator:
+  - name: freeradius-config
+    files:
+      - clients.conf=./k8s/config/clients.conf
+      - eap=./k8s/config/eap
+      - authorize=./k8s/config/authorize
+
