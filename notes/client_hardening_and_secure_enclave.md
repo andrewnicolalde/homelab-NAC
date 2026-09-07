@@ -26,6 +26,14 @@ This document captures the implementation plan and technical analysis for harden
     - *Option A (Automated):* Standalone `.mobileconfig` with a native `com.apple.security.scep` or `com.apple.security.acme` payload enrolling against our local CA.
     - *Option B (Manual CSR):* Lightweight Swift script using `Security.framework` (`kSecAttrTokenIDSecureEnclave`) to generate a CSR on-device and sign it with `step-ca`.
 
+- [ ] **Task 4: Migrate Certificate Authority to a Hardware Root of Trust (YubiKey PIV)**
+  - Select an appropriate physical YubiKey (evaluating YubiKey 4 vs 5 and dual-use Passkey implications).
+  - Provision Root CA private key directly inside YubiKey PIV hardware (Slot `9c` or `9a`) using **NIST P-384** (`ECCP384`) with mandatory physical touch policy.
+  - Evaluate CA hierarchy design:
+    - *Option A (2-Tier Offline Root):* YubiKey Root CA mints a software Intermediate CA (for Talos/Kubernetes/FreeRADIUS). YubiKey stays offline in cold storage.
+    - *Option B (1-Tier Direct):* YubiKey directly issues leaf certificates via PKCS#11 interface (`step-ca` or OpenSSL).
+  - Re-issue server, AP, and client certificates from the hardware-backed CA and update Kubernetes secrets.
+
 ---
 
 ## Detailed Technical Analysis
@@ -160,3 +168,87 @@ guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error)
 Once the CSR is exported:
 1. Sign the CSR on your CA using `step certificate sign client-device-01.csr client.crt --ca root_ca.crt --ca-key root_ca.key`.
 2. Import `client.crt` back into Keychain. macOS automatically matches the public key in `client.crt` with the non-exportable private key residing in the Secure Enclave.
+
+---
+
+### 4. Hardware Root of Trust CA Migration (YubiKey PIV)
+
+To establish the ultimate zero-trust security posture for our homelab NAC, we will migrate the software Root CA (`root_ca.key` currently stored unencrypted on disk) into a dedicated hardware token (YubiKey).
+
+#### A. YubiKey 4 Series vs. YubiKey 5 Series
+
+| Feature | YubiKey 4 Series | YubiKey 5 Series |
+| :--- | :--- | :--- |
+| **PIV Applet (Smart Card)** | Supported | Supported |
+| **Elliptic Curve Support (PIV)** | **ECCP256, ECCP384** | **ECCP256, ECCP384**, Ed25519 (firmware 5.7+) |
+| **RSA Support (PIV)** | RSA 1024, RSA 2048 | RSA 2048, RSA 3072, RSA 4096 (firmware 5.7+) |
+| **FIDO2 / WebAuthn (Passkeys)** | **Not Supported** (U2F only) | **Full Support** (Resident Passkeys) |
+| **CryptoTokenKit / PKCS#11** | Fully compatible (`libykcs11`, OpenSC) | Fully compatible (`libykcs11`, OpenSC) |
+
+> [!IMPORTANT]
+> **Both the YubiKey 4 and YubiKey 5 natively support NIST P-384 (`ECCP384`) in their PIV applets.**
+> This means either device is cryptographically capable of serving as our Root CA while strictly maintaining **CNSA 1.0 (WPA3-Enterprise 192-bit / Suite B)** compliance!
+
+#### B. Dual-Use Considerations: PIV CA vs. WebAuthn Passkeys
+
+If a YubiKey is already being used as a backup Passkey for online websites, consider:
+
+1. **Cryptographic & Logical Isolation:**
+   - On a YubiKey, **the PIV applet and the FIDO2/WebAuthn applet are completely separated**.
+   - PIV has its own PIN, PUK, and 24-byte 3DES/AES Management Key (`010203...`).
+   - FIDO2 has its own separate PIN and credential database.
+   - Initializing, generating keys in, or resetting the PIV applet **will never erase or affect FIDO2 Passkeys**, and vice versa.
+2. **Operational Security (OpSec) & Cold Storage:**
+   - A **Root CA private key** is the cryptographic foundation of the entire homelab. Standard industry practice requires Root CAs to remain **cold / offline** (stored in a safe or drawer, only attached to an air-gapped machine when signing an Intermediate CA or revoking credentials).
+   - An interactive **daily driver or backup Passkey** is something you plug in regularly for web browsing, carry around, or keep on a keychain.
+   - **Recommendation:** **Dedicate a YubiKey 4 series as the offline Root CA.**
+     - Since the YubiKey 4 cannot store modern FIDO2 Passkeys anyway, dedicating it entirely to the Root CA avoids tying up your versatile YubiKey 5 devices.
+     - The YubiKey 4 can live offline in cold storage, safely holding the non-exportable P-384 Root CA key.
+
+#### C. CA Architecture Options
+
+```mermaid
+graph TD
+    subgraph "Option A: Two-Tier CA (Recommended)"
+        YK_Root["YubiKey (PIV Slot 9c)<br/>Offline Root CA (P-384)<br/>🔒 Cold Storage"]
+        Inter_CA["Software Intermediate CA<br/>(Talos / FreeRADIUS / step-ca)<br/>Active Day-to-Day Issuer"]
+        Leaf_Srv["server.crt (RADIUS)"]
+        Leaf_AP["unifi-ap.crt (RADSec)"]
+        Leaf_Client["client.crt (client-device-01)"]
+        
+        YK_Root -->|"Signs Once"| Inter_CA
+        Inter_CA --> Leaf_Srv
+        Inter_CA --> Leaf_AP
+        Inter_CA --> Leaf_Client
+    end
+```
+
+* **Option A: Two-Tier Hierarchy (Recommended):**
+  - The YubiKey generates an `ECCP384` Root CA in slot `9c` (Digital Signature) with `TOUCH_POLICY_ALWAYS`.
+  - The YubiKey is plugged in **once** to sign an Intermediate CA certificate.
+  - The Intermediate CA runs in Kubernetes or on the admin workstation to mint short- or medium-lived leaf certificates.
+  - The YubiKey Root CA is unplugged and returned to cold storage.
+* **Option B: Single-Tier Direct CA:**
+  - The YubiKey directly signs every leaf certificate (`server.crt`, `unifi-ap.crt`, `client.crt`) via `yubico-piv-tool` or Smallstep's PKCS#11 HSM provider.
+  - Requires plugging in and physically touching the YubiKey whenever a new certificate is issued.
+
+#### D. Tooling & Provisioning Commands
+When we are ready to implement Task 4, we will use `yubikey-manager` (`ykman`):
+```bash
+# 1. Check connected key model and firmware
+ykman info
+
+# 2. Generate NIST P-384 key directly in PIV Slot 9c with touch policy enforced
+ykman piv keys generate \
+    --algorithm ECCP384 \
+    --pin-policy ONCE \
+    --touch-policy ALWAYS \
+    9c root_ca.pub
+
+# 3. Generate self-signed Root CA certificate directly on the hardware token
+ykman piv certificates generate \
+    --subject "CN=Homelab Hardware Root CA,O=Homelab,C=US" \
+    --valid-days 3650 \
+    9c root_ca.pub
+```
+
