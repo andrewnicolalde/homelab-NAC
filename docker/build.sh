@@ -1,1 +1,1 @@
-podman build -t ghcr.io/andrewnicolalde/homelab-nacl/freeradius:latest .
+podman build -t ghcr.io/andrewnicolalde/homelab-nac/freeradius:latest .
