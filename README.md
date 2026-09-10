@@ -122,7 +122,7 @@ To export the macOS client identity bundle:
 ```
 
 ### 3. Deploy to Kubernetes
-1. Configure NAS clients in [`k8s/config/clients.conf`](file:///Users/andrew/Developer/RADIUS-Experimentation/k8s/config/clients.conf) with your AP/workstation IPs and secrets.
+1. Copy [`k8s/config/clients.conf.example`](k8s/config/clients.conf.example) to `k8s/config/clients.conf` (gitignored) and configure your NAS clients, AP/workstation IPs, and RADIUS secrets.
 2. Generate GitHub Container Registry secret (if pulling private image):
    ```bash
    ./k8s/setup-ghcr-auth.sh <GITHUB_USERNAME> <GITHUB_PAT>
@@ -165,7 +165,7 @@ Before testing over physical Wi-Fi, run the containerized `eapol_test` suite to 
 
 ## Security Roadmap & Future Milestones
 
-Detailed implementation plans for upcoming milestones are documented in [`notes/client_hardening_and_secure_enclave.md`](file:///Users/andrew/Developer/RADIUS-Experimentation/notes/client_hardening_and_secure_enclave.md):
+Detailed implementation plans for upcoming milestones are documented in [`notes/client_hardening_and_secure_enclave.md`](notes/client_hardening_and_secure_enclave.md):
 
 1. **Scoped `.mobileconfig` Trust Anchoring:**
    Replacing Keychain root certificate trust with an Apple Configuration Profile (`.mobileconfig`). Scopes the CA anchor exclusively to the `ENTERPRISE-WIFI` SSID via `PayloadCertificateAnchorUUID` and pins server names via `TLSTrustedServerNames`, eliminating web HTTPS MITM exposure.
