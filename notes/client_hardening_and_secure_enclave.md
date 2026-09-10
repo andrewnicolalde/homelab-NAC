@@ -63,7 +63,7 @@ security dump-trust-settings
 
 Under normal macOS GUI imports, if a user marks a Root CA as "Always Trust" in Keychain Access, that CA becomes trusted system-wide—enabling it to issue valid certificates for any HTTPS website, potentially creating an inspection/MITM vulnerability.
 
-#### The Zero-Trust Solution: `.mobileconfig`
+#### The Scoped Trust Solution: `.mobileconfig`
 An Apple Configuration Profile resolves this by scoping trust at the payload level:
 
 ```mermaid
@@ -173,7 +173,7 @@ Once the CSR is exported:
 
 ### 4. Hardware Root of Trust CA Migration (YubiKey PIV)
 
-To establish the ultimate zero-trust security posture for our homelab NAC, we will migrate the software Root CA (`root_ca.key` currently stored unencrypted on disk) into a dedicated hardware token (YubiKey).
+To establish a robust hardware-backed security posture for our homelab NAC, we will migrate the software Root CA (`root_ca.key` currently stored unencrypted on disk) into a dedicated hardware token (YubiKey).
 
 #### A. YubiKey 4 Series vs. YubiKey 5 Series
 

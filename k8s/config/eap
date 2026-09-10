@@ -38,7 +38,7 @@ eap {
         tls_min_version = "1.2"
         tls_max_version = "1.2"
 
-        # Explicitly disable session resumption caching for strict zero-trust security
+        # Explicitly disable session resumption caching to enforce full mutual re-authentication
         cache {
             enable = no
             # lifetime = 24 # hours

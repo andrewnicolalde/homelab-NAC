@@ -1,4 +1,4 @@
-# Homelab Zero-Trust 802.1X NAC (CNSA 1.0 Suite B 192-bit)
+# Homelab 802.1X NAC (CNSA 1.0 Suite B 192-bit)
 
 [![CNSA 1.0 Compliant](https://img.shields.io/badge/Security-CNSA%201.0%20%2F%20Suite%20B%20192--bit-blue.svg)](#cryptographic-specification)
 [![FreeRADIUS 3.x](https://img.shields.io/badge/FreeRADIUS-v3.x-orange.svg)](#kubernetes-infrastructure)
@@ -6,7 +6,7 @@
 [![UniFi Ecosystem](https://img.shields.io/badge/UniFi-U6--Mesh%20%26%20US--8--60W-005FFF.svg)](#network-architecture--quarantine-design)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An enterprise-grade, zero-trust **802.1X Network Access Control (NAC)** system deployed on Kubernetes (**Talos Linux on Raspberry Pi**). This architecture enforces strict **NSA Commercial National Security Algorithm (CNSA 1.0 / Suite B 192-bit)** cryptography over **WPA3-Enterprise**, dynamic RFC 3580 VLAN steering, and hardware-enforced Layer 2 quarantine policies on Ubiquiti UniFi network hardware.
+An enterprise-grade **802.1X Network Access Control (NAC)** system deployed on Kubernetes (**Talos Linux on Raspberry Pi**). This architecture enforces strict **NSA Commercial National Security Algorithm (CNSA 1.0 / Suite B 192-bit)** cryptography over **WPA3-Enterprise**, dynamic RFC 3580 VLAN steering, and hardware-enforced Layer 2 quarantine policies on Ubiquiti UniFi network hardware.
 
 ---
 
@@ -29,7 +29,7 @@ graph TD
             RADIUS_ACCT["1813/UDP (NodePort 31813)"]
             RADSEC["2083/TCP (NodePort 32083)"]
             
-            Core["FreeRADIUS Engine<br/>- Cache disabled (Zero-Trust)<br/>- NIST P-384 Chain Verification<br/>- RFC 3580 VLAN Steering"]
+            Core["FreeRADIUS Engine<br/>- Cache disabled (Full Re-Auth)<br/>- NIST P-384 Chain Verification<br/>- RFC 3580 VLAN Steering"]
         end
 
         K8S_SECRET["Secret: freeradius-certs<br/>- root_ca.crt (P-384)<br/>- server.crt & server.key"]
@@ -68,7 +68,8 @@ This implementation strictly adheres to the **NSA CNSA 1.0 (Suite B 192-bit)** s
 | **Wi-Fi AKM Suite** | **IEEE 802.11 AKM 12 (`00:0f:ac:12`)** | `WPA (SHA384-SuiteB)`. |
 | **Data Frame Cipher** | **GCMP-256 (`00:0f:ac:9`)** | Both Pairwise and Group ciphers use Galois/Counter Mode 256-bit. |
 | **Management Frames** | **BIP-GMAC-256 (PMF Mandatory)** | Protected Management Frames enforced; non-PMF clients blocked. |
-| **Session Cache Policy** | **Disabled (`cache { enable = no }`)** | Enforces full mutual TLS handshake on every connection (zero-trust). |
+| **Session Cache Policy** | **Disabled (`cache { enable = no }`)** | Enforces full mutual TLS handshake on every reconnection (no session resumption). |
+
 
 ---
 
