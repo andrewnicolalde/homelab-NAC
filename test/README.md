@@ -34,8 +34,8 @@ This directory provides an automated, containerized test harness using `eapol_te
    FreeRADIUS drops packets from unknown IP addresses. If running the test from your workstation (e.g. `10.10.10.x`), ensure your workstation (or the subnet it's on) is permitted in `k8s/config/clients.conf`:
    ```text
    client workstation_test {
-       ipaddr = 10.10.10.69/32
-       secret = 'REPLACE_WITH_STRONG_48_CHAR_SECRET'
+       ipaddr = 10.10.10.0/24
+       secret = 'YOUR_STRONG_48_CHAR_SECRET'
        require_message_authenticator = yes
        nas_type = other
    }
@@ -51,6 +51,12 @@ Execute the automated test script:
 ./test/run-test.sh
 ```
 
+The script automatically detects your secret in this order of precedence:
+1. Positional argument: `./test/run-test.sh <SERVER> <PORT> <SECRET>`
+2. Environment variable: `export RADIUS_SECRET='...'`
+3. Local unversioned file: `.radius_secret` in the repository root
+4. Local unversioned config: `k8s/config/clients.conf`
+
 ### Custom Server / Port / Secret
 
 You can override target parameters via positional arguments:
@@ -59,7 +65,7 @@ You can override target parameters via positional arguments:
 ./test/run-test.sh <SERVER_IP> <PORT> <SECRET> <CONFIG_FILE>
 
 # Example:
-./test/run-test.sh 10.50.0.100 31812 'REPLACE_WITH_TEST_SECRET_64_CHAR' eapol_test.conf
+./test/run-test.sh 10.50.0.100 31812 "$RADIUS_SECRET" eapol_test.conf
 ```
 
 ---

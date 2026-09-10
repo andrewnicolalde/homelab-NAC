@@ -4,5 +4,16 @@
 *.pfx
 *.pem
 
+# Ignore secret files and environment configs
+.radius_secret
+*.secret
+.env
+*.env
+.env.*
+
+# Ignore active local client config containing live RADIUS shared secrets
+k8s/config/clients.conf
+
 # Ignore temporary files
 .DS_Store
+

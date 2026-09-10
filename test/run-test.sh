@@ -12,8 +12,28 @@ CERTS_DIR="${REPO_ROOT}/certificate-authority"
 # Target FreeRADIUS NodePort settings (default to Pi node IP and NodePort 31812)
 RADIUS_SERVER="${1:-10.50.0.100}"
 RADIUS_PORT="${2:-31812}"
-RADIUS_SECRET="${3:-REPLACE_WITH_STRONG_48_CHAR_SECRET}"
 CONFIG_FILE="${4:-eapol_test.conf}"
+
+# Dynamically resolve RADIUS_SECRET without storing sensitive values in version control
+SECRET_FILE="${REPO_ROOT}/.radius_secret"
+if [ -n "${3:-}" ]; then
+    RADIUS_SECRET="$3"
+elif [ -n "${RADIUS_SECRET:-}" ]; then
+    RADIUS_SECRET="${RADIUS_SECRET}"
+elif [ -f "${SECRET_FILE}" ]; then
+    RADIUS_SECRET="$(tr -d '\r\n' < "${SECRET_FILE}")"
+elif [ -f "${REPO_ROOT}/k8s/config/clients.conf" ]; then
+    # Fallback: parse secret from local unversioned clients.conf
+    RADIUS_SECRET="$(awk -F"'" '/secret\s*=\s*'\''/ {print $2; exit}' "${REPO_ROOT}/k8s/config/clients.conf" || true)"
+fi
+
+if [ -z "${RADIUS_SECRET:-}" ]; then
+    echo "❌ Error: RADIUS secret not provided." >&2
+    echo "  Specify via positional argument: ./run-test.sh <SERVER> <PORT> <SECRET>" >&2
+    echo "  Or export RADIUS_SECRET in your environment: export RADIUS_SECRET='...'" >&2
+    echo "  Or create unversioned secret file: ${SECRET_FILE}" >&2
+    exit 1
+fi
 
 IMAGE_NAME="eapol-test:local"
 
@@ -23,7 +43,9 @@ echo "==========================================================================
 echo "  Target Server : ${RADIUS_SERVER}:${RADIUS_PORT}"
 echo "  Config File   : ${CONFIG_FILE}"
 echo "  Identity      : client-device-01"
+echo "  Secret Source : $([ -n "${3:-}" ] && echo "Positional Arg" || ([ -n "${RADIUS_SECRET:-}" ] && [ -f "${SECRET_FILE}" ] && echo ".radius_secret file" || echo "Environment / Config"))"
 echo "=============================================================================="
+
 
 # 1. Determine container runtime (podman or docker)
 if command -v podman >/dev/null 2>&1; then
