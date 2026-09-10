@@ -1,8 +1,11 @@
-# Ignore private keys and PKCS#12 bundles
+# Ignore private keys, certificates, and PKCS#12 bundles
 *.key
 *.p12
 *.pfx
 *.pem
+*.crt
+scratch_certs_backup/
+
 
 # Ignore secret files and environment configs
 .radius_secret
