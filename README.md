@@ -4,6 +4,7 @@
 [![FreeRADIUS 3.x](https://img.shields.io/badge/FreeRADIUS-v3.x-orange.svg)](#kubernetes-infrastructure)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-Talos%20Linux%20(arm64)-326CE5.svg)](#kubernetes-infrastructure)
 [![UniFi Ecosystem](https://img.shields.io/badge/UniFi-U6--Mesh%20%26%20US--8--60W-005FFF.svg)](#network-architecture--quarantine-design)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An enterprise-grade, zero-trust **802.1X Network Access Control (NAC)** system deployed on Kubernetes (**Talos Linux on Raspberry Pi**). This architecture enforces strict **NSA Commercial National Security Algorithm (CNSA 1.0 / Suite B 192-bit)** cryptography over **WPA3-Enterprise**, dynamic RFC 3580 VLAN steering, and hardware-enforced Layer 2 quarantine policies on Ubiquiti UniFi network hardware.
 
@@ -175,3 +176,10 @@ Detailed implementation plans for upcoming milestones are documented in [`notes/
    Generating client private keys directly inside secure hardware without commercial MDM:
    * **Option A:** YubiKey 5 PIV smart card (NIST P-384 for strict CNSA 1.0).
    * **Option B:** Apple Secure Enclave (`kSecAttrTokenIDSecureEnclave`) via SCEP/ACME configuration profiles or local Swift CSR generation (NIST P-256).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+

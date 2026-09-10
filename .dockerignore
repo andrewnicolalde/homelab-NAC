@@ -1,0 +1,28 @@
+# Git and repository metadata
+.git
+.gitignore
+.dockerignore
+.github/
+
+# Documentation and planning
+*.md
+notes/
+
+# Test harnesses and local artifacts
+test/
+
+# Certificates and secret configurations
+certificate-authority/
+k8s/
+.radius_secret
+*.secret
+.env
+*.env
+.env.*
+*.key
+*.crt
+*.p12
+*.pem
+
+# System files
+.DS_Store
