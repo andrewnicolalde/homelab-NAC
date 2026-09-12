@@ -23,27 +23,47 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ------------------------------------------------------------------------------
 # 1. Configuration & Argument Parsing
 # ------------------------------------------------------------------------------
-# Source optional certs.env configuration file if present
-if [ -f "${SCRIPT_DIR}/certs.env" ]; then
+CONFIG_FILE="${CONFIG_FILE:-${CERTS_ENV:-}}"
+
+# Parse command line options
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --config|-c)
+            CONFIG_FILE="$2"
+            shift 2
+            ;;
+        --output-dir|-o)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --yubikey)
+            USE_YUBIKEY="true"
+            shift
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Restore positional parameters
+set -- "${POSITIONAL_ARGS[@]:+${POSITIONAL_ARGS[@]}}"
+
+# Source optional configuration file if specified or present locally
+if [ -n "${CONFIG_FILE}" ] && [ -f "${CONFIG_FILE}" ]; then
+    # shellcheck source=/dev/null
+    source "${CONFIG_FILE}"
+elif [ -f "./certs.env" ]; then
+    # shellcheck source=/dev/null
+    source "./certs.env"
+elif [ -f "${SCRIPT_DIR}/certs.env" ]; then
     # shellcheck source=/dev/null
     source "${SCRIPT_DIR}/certs.env"
-elif [ -f "${SCRIPT_DIR}/../certs.env" ]; then
-    # shellcheck source=/dev/null
-    source "${SCRIPT_DIR}/../certs.env"
-elif [ -f "${SCRIPT_DIR}/../../homelab-networking-config/certs.env" ]; then
-    # shellcheck source=/dev/null
-    source "${SCRIPT_DIR}/../../homelab-networking-config/certs.env"
-elif [ -f "${SCRIPT_DIR}/../../homelab-config/certs.env" ]; then
-    # shellcheck source=/dev/null
-    source "${SCRIPT_DIR}/../../homelab-config/certs.env"
 fi
 
 USE_YUBIKEY="${USE_YUBIKEY:-false}"
-if [ "${1:-}" = "--yubikey" ]; then
-    USE_YUBIKEY="true"
-    shift
-fi
-
 RADIUS_IP="${1:-${RADIUS_IP:-10.50.0.100}}"
 CLIENT_IDENTITY="${2:-${CLIENT_IDENTITY:-client-device-01}}"
 ROOT_CA_NAME="${ROOT_CA_NAME:-Enterprise Root CA}"
