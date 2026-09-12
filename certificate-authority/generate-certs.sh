@@ -228,15 +228,28 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
     fi
 
     # --------------------------------------------------------------------------
-    # Packaging Client PKCS#12 Bundle (Dual Root Trust Anchor)
+    # Packaging Client PKCS#12 Bundle (macOS Keychain Compatible)
     # --------------------------------------------------------------------------
     echo ""
     if [ ! -f "client.p12" ]; then
         echo "==> Packaging client certificate into client.p12..."
-        # Bundles user_root_ca.crt (client identity chain) and server_root_ca.crt (server validation)
+        # NOTE (macOS Keychain Access Compatibility vs. Modern Defaults):
+        # By default, `step certificate p12` encodes archives using modern PBES2 (RFC 8018)
+        # with AES-256-CBC, PBKDF2 (HMAC-SHA256), and a SHA-256 MAC for integrity.
+        # This modern default is cryptographically superior: it provides full 256-bit symmetric
+        # security and robust offline GPU brute-force resistance, avoiding deprecated 3DES
+        # (~112-bit effective security) and export-grade 40-bit RC2.
+        #
+        # However, Apple's Security.framework (SecPKCS12Import) has a hard OS-level limitation:
+        # it strictly expects legacy PKCS#12 v1.0 (RFC 7292) structures using SHA-1 MAC and
+        # PBES1 (3DES for keys, RC2-40 for cert bags). When fed modern PBES2, macOS Keychain
+        # fails with "unable to decode the provided data" (SecKeychainItemImport: MAC verification failed).
+        # We pass `--legacy` here strictly to ensure compatibility with Apple's Keychain parser.
         step certificate p12 client.p12 client.crt client.key \
+            --legacy \
             --ca user_root_ca.crt \
             --ca server_root_ca.crt
+        chmod 600 client.p12
         echo "✔ Created: client.p12"
     else
         echo "==> client.p12 already exists. Skipping."
@@ -325,8 +338,13 @@ else
 
     if [ ! -f "client.p12" ]; then
         echo "==> Packaging client certificate into client.p12..."
+        # NOTE (macOS Keychain Access Compatibility):
+        # Passing `--legacy` uses RFC 7292 PBES1 (3DES/RC2-40) rather than modern PBES2 (AES-256)
+        # strictly to satisfy Apple's legacy SecPKCS12Import parser in macOS Keychain Access.
         step certificate p12 client.p12 client.crt client.key \
+            --legacy \
             --ca root_ca.crt
+        chmod 600 client.p12
         echo "✔ PKCS#12 bundle created: client.p12"
     else
         echo "==> Client PKCS#12 bundle already exists (client.p12). Skipping."
