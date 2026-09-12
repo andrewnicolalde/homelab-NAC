@@ -4,6 +4,12 @@
 *.pfx
 *.pem
 *.crt
+*.csr
+*.cer
+*.der
+*.pub
+*.crl
+*.srl
 scratch_certs_backup/
 
 
