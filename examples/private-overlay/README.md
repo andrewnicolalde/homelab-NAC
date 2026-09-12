@@ -83,5 +83,5 @@ To configure site-specific parameters when generating certificates:
    CLIENT_IDENTITY="client-device-01"
    ROOT_CA_NAME="Enterprise Root CA"
    ```
-3. Run `generate-certs.sh` (or pass parameters directly: `./generate-certs.sh 10.50.0.100 client-device-01`). The generator automatically sources `certs.env` if present.
+3. Run `./generate-certs.sh --full-with-defaults` for the complete bootstrap, or `./generate-certs.sh --client client-device-02` to issue credentials for a new device. The generator automatically sources `certs.env` if present.
 

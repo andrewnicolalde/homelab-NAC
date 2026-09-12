@@ -10,6 +10,7 @@
 *.pub
 *.crl
 *.srl
+*.mobileconfig
 scratch_certs_backup/
 
 

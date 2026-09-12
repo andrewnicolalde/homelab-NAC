@@ -122,7 +122,12 @@ To allow keeping this repository public on GitHub while maintaining complete pri
 Run the automated generation script to create the full NIST P-384 certificate hierarchy:
 ```bash
 cd certificate-authority
-./generate-certs.sh client-device-01
+
+# Initial full infrastructure bootstrap
+./generate-certs.sh --full-with-defaults
+
+# Or provision an individual client device
+./generate-certs.sh --client client-device-02
 ```
 
 To export the macOS client identity bundle:
