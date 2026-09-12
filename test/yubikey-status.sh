@@ -178,7 +178,7 @@ fi
 # 9. Hardware Root CA Readiness & Security Advisory Assessment
 header "8. Hardware Root CA Architecture & Security Assessment"
 
-echo -e "${BOLD}Assessment for Homelab Root CA Duty (PIV Slot 9c with NIST P-384):${RESET}\n"
+echo -e "${BOLD}Assessment for Hardware Root CA Duty (PIV Slot 9c with NIST P-384):${RESET}\n"
 
 # A. Firmware & Management Key Capability
 if [[ "$FW_VERSION" > "5.4.2" || "$FW_VERSION" == "5.4.2" ]]; then

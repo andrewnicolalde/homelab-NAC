@@ -12,9 +12,9 @@ client localhost {
     nas_type = other
 }
 
-# 2. Homelab Authenticators (UniFi APs and Switches)
-# The secret here MUST match the RADIUS Secret entered in your UniFi RADIUS Profile.
-client homelab_network {
+# 2. Network Authenticators (APs and Switches)
+# The secret here MUST match the RADIUS Secret entered in your AP/switch RADIUS Profile.
+client network_authenticators {
     ipaddr = 10.1.0.0/24
     secret = 'CHANGE_ME_TO_STRONG_48_CHAR_SECRET'
     require_message_authenticator = yes

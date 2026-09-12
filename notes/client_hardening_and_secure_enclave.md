@@ -68,9 +68,9 @@ An Apple Configuration Profile resolves this by scoping trust at the payload lev
 
 ```mermaid
 graph TD
-    Profile[Apple Configuration Profile: .mobileconfig]
+    Profile["Apple Configuration Profile: .mobileconfig"]
     
-    subgraph Payloads
+    subgraph Payloads ["Payloads"]
         RootPayload["Payload 1: com.apple.security.root<br/>(Contains root_ca.crt, UUID: AAAA-...)"]
         WiFiPayload["Payload 2: com.apple.wifi.managed<br/>SSID: ENTERPRISE-WIFI<br/>EAP-TLS Enabled"]
     end
@@ -79,7 +79,7 @@ graph TD
     Profile --> WiFiPayload
     WiFiPayload -->|"PayloadCertificateAnchorUUID = AAAA-..."| RootPayload
     
-    subgraph macOS System Impact
+    subgraph SystemImpact ["macOS System Impact"]
         WiFiContext["802.1X EAP-TLS Authentication<br/>(ENTERPRISE-WIFI ONLY)"]
         WebContext["System Trust Store / Web Browsers<br/>(Safari, Chrome, curl)"]
     end
@@ -154,7 +154,7 @@ let attributes: [String: Any] = [
     kSecPrivateKeyAttrs as String: [
         kSecAttrIsPermanent as String:    true,
         kSecAttrAccessControl as String:  access,
-        kSecAttrLabel as String:          "client-device-01-wifi-identity"
+        kSecAttrLabel as String:          "client-wifi-identity"
     ]
 ]
 
@@ -166,7 +166,7 @@ guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error)
 // Generate PKCS#10 CSR using SecKeyCreateSignature...
 ```
 Once the CSR is exported:
-1. Sign the CSR on your CA using `step certificate sign client-device-01.csr client.crt --ca root_ca.crt --ca-key root_ca.key`.
+1. Sign the CSR on your CA using `step certificate sign client.csr client.crt --ca root_ca.crt --ca-key root_ca.key`.
 2. Import `client.crt` back into Keychain. macOS automatically matches the public key in `client.crt` with the non-exportable private key residing in the Secure Enclave.
 
 ---
@@ -209,8 +209,8 @@ If a YubiKey is already being used as a backup Passkey for online websites, cons
 
 ```mermaid
 graph TD
-    subgraph "Option A: Two-Tier CA (Recommended)"
-        YK_Root["YubiKey (PIV Slot 9c)<br/>Offline Root CA (P-384)<br/>🔒 Cold Storage"]
+    subgraph OptionA ["Option A: Two-Tier CA (Recommended)"]
+        YK_Root["YubiKey (PIV Slot 9c)<br/>Offline Root CA (P-384)<br/>Cold Storage"]
         Inter_CA["Software Intermediate CA<br/>(Talos / FreeRADIUS / step-ca)<br/>Active Day-to-Day Issuer"]
         Leaf_Srv["server.crt (RADIUS)"]
         Leaf_AP["unifi-ap.crt (RADSec)"]

@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CERTS_DIR="${REPO_ROOT}/certificate-authority"
 
-# Target FreeRADIUS NodePort settings (default to Pi node IP and NodePort 31812)
-RADIUS_SERVER="${1:-10.50.0.100}"
+# Target FreeRADIUS NodePort settings (default to cluster node IP and NodePort 31812)
+RADIUS_SERVER="${1:-${RADIUS_SERVER:-10.50.0.100}}"
 RADIUS_PORT="${2:-31812}"
 CONFIG_FILE="${4:-eapol_test.conf}"
 
@@ -37,12 +37,23 @@ fi
 
 IMAGE_NAME="eapol-test:local"
 
+TEST_IDENTITY="${TEST_IDENTITY:-client-device-01}"
+
+EXPECTED_VLAN="${EXPECTED_VLAN:-}"
+if [ -z "${EXPECTED_VLAN}" ]; then
+    if [ -f "${SCRIPT_DIR}/../k8s/config/authorize" ]; then
+        EXPECTED_VLAN=$(grep "Tunnel-Private-Group-Id" "${SCRIPT_DIR}/../k8s/config/authorize" | head -n1 | sed -E 's/.*"([0-9]+)".*/\1/' || echo "")
+    fi
+    EXPECTED_VLAN="${EXPECTED_VLAN:-10}"
+fi
+
 echo "=============================================================================="
 echo "  CNSA WPA3-Enterprise 192-bit EAP-TLS Automated Test"
 echo "=============================================================================="
 echo "  Target Server : ${RADIUS_SERVER}:${RADIUS_PORT}"
 echo "  Config File   : ${CONFIG_FILE}"
-echo "  Identity      : client-device-01"
+echo "  Identity      : ${TEST_IDENTITY}"
+echo "  Expected VLAN : ${EXPECTED_VLAN}"
 echo "  Secret Source : $([ -n "${3:-}" ] && echo "Positional Arg" || ([ -n "${RADIUS_SECRET:-}" ] && [ -f "${SECRET_FILE}" ] && echo ".radius_secret file" || echo "Environment / Config"))"
 echo "=============================================================================="
 
@@ -110,12 +121,14 @@ else
     SUCCESS=false
 fi
 
-# Check RFC 3580 Dynamic VLAN assignment (VLAN 80)
-# eapol_test prints attribute on one line and hex value on the next (0x3830 = ASCII "80")
-if echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Private-Group-Id" | grep -qiE "(3830|80)"; then
-    echo "✔ Dynamic VLAN Assignment: PASSED (Assigned to VLAN 80 [hex: 3830])"
+# Check RFC 3580 Dynamic VLAN assignment
+VLAN_HEX=$(printf "%s" "${EXPECTED_VLAN}" | xxd -p 2>/dev/null || printf "%s" "${EXPECTED_VLAN}" | od -A n -t x1 | tr -d ' \n' 2>/dev/null || echo "")
+if [ -n "${VLAN_HEX}" ] && echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Private-Group-Id" | grep -qiE "(${VLAN_HEX}|${EXPECTED_VLAN})"; then
+    echo "✔ Dynamic VLAN Assignment: PASSED (Assigned to VLAN ${EXPECTED_VLAN})"
+elif echo "${TEST_OUTPUT}" | grep -A 1 "Tunnel-Private-Group-Id" | grep -qiE "${EXPECTED_VLAN}"; then
+    echo "✔ Dynamic VLAN Assignment: PASSED (Assigned to VLAN ${EXPECTED_VLAN})"
 else
-    echo "❌ Dynamic VLAN Assignment: FAILED (VLAN 80 attribute not received)"
+    echo "❌ Dynamic VLAN Assignment: FAILED (VLAN ${EXPECTED_VLAN} attribute not received)"
     SUCCESS=false
 fi
 

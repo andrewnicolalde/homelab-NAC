@@ -11,8 +11,8 @@
 #   3. Tunnel-Private-Group-Id = "<VLAN_ID>"
 # ==============================================================================
 
-# Device: client-device-01 (Client Certificate CN: client-device-01) -> VLAN 80
+# Device Example: client-device-01 (Client Certificate CN: client-device-01) -> VLAN 10
 client-device-01
     Tunnel-Type = VLAN,
     Tunnel-Medium-Type = IEEE-802,
-    Tunnel-Private-Group-Id = "80"
+    Tunnel-Private-Group-Id = "10"

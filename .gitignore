@@ -13,10 +13,14 @@ scratch_certs_backup/
 .env
 *.env
 .env.*
+certs.env
 
-# Ignore active local client config containing live RADIUS shared secrets
+# Ignore active local client config and authorization containing live network specifics
 k8s/config/clients.conf
+k8s/config/authorize
 
-# Ignore temporary files
+# Ignore temporary files and packet captures
 .DS_Store
+*.pcap
+*.pcapng
 

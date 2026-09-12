@@ -57,7 +57,7 @@ graph TD
 ## Proposed Directory & File Structure
 
 ```text
-RADIUS-Experimentation/
+homelab-NAC/
 ├── certificate-authority/         # (Completed)
 │   ├── root_ca.crt / root_ca.key
 │   ├── server.crt / server.key

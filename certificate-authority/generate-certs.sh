@@ -23,7 +23,35 @@ cd "${SCRIPT_DIR}"
 echo "Working directory: ${SCRIPT_DIR}"
 
 # Elliptic Curve: WPA3-Enterprise 192-bit (CNSA) mandates NIST P-384 (ECDSA-SHA384)
-CURVE="P-384"
+CURVE="${CURVE:-P-384}"
+
+# ------------------------------------------------------------------------------
+# Configuration (Precedence: CLI argument > Environment / certs.env > Default)
+# ------------------------------------------------------------------------------
+# Source optional certs.env configuration file if present
+if [ -f "${SCRIPT_DIR}/certs.env" ]; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/certs.env"
+elif [ -f "${SCRIPT_DIR}/../certs.env" ]; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/../certs.env"
+elif [ -f "${SCRIPT_DIR}/../../homelab-networking-config/certs.env" ]; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/../../homelab-networking-config/certs.env"
+elif [ -f "${SCRIPT_DIR}/../../homelab-config/certs.env" ]; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/../../homelab-config/certs.env"
+fi
+
+RADIUS_IP="${1:-${RADIUS_IP:-10.50.0.100}}"
+CLIENT_IDENTITY="${2:-${CLIENT_IDENTITY:-client-device-01}}"
+ROOT_CA_NAME="${ROOT_CA_NAME:-Enterprise Root CA}"
+AP_IDENTITY="${AP_IDENTITY:-unifi-aps}"
+
+# Optional additional Subject Alternative Names (SANs)
+if [ -z "${ADDITIONAL_SANS+x}" ]; then
+    ADDITIONAL_SANS=()
+fi
 
 # ------------------------------------------------------------------------------
 # 1. Create the Root Certificate Authority (Root CA)
@@ -36,7 +64,7 @@ CURVE="P-384"
 # ------------------------------------------------------------------------------
 if [ ! -f "root_ca.crt" ]; then
     echo "==> Creating Root CA (${CURVE})..."
-    step certificate create "Homelab Root CA" root_ca.crt root_ca.key \
+    step certificate create "${ROOT_CA_NAME}" root_ca.crt root_ca.key \
         --profile root-ca \
         --kty EC --curve "${CURVE}" \
         --not-after=87600h \
@@ -53,16 +81,6 @@ fi
 #   and RADSec (TLS encryption between APs and FreeRADIUS).
 # - Profile 'leaf' signs this certificate using the Root CA and sets serverAuth.
 # ------------------------------------------------------------------------------
-RADIUS_IP="10.50.0.100"
-
-# Optional additional Subject Alternative Names (SANs)
-# Add any extra hostnames or FQDNs here if you decide to enable them in the future.
-# Leave empty () so that ONLY the RADIUS_IP is valid for the server certificate.
-ADDITIONAL_SANS=(
-    # "radius.homelab.lan"
-    # "radius.local"
-)
-
 # Build SAN arguments: always include RADIUS_IP, plus any optional SANs
 SERVER_SAN_ARGS=(--san "${RADIUS_IP}")
 if [ "${#ADDITIONAL_SANS[@]}" -gt 0 ]; then
@@ -129,11 +147,8 @@ fi
 # ------------------------------------------------------------------------------
 # - Used by your test client device (e.g., MacBook, iPhone, test laptop).
 # - Subject name can be a user or device identifier (e.g. 'andrew-laptop').
-# - In FreeRADIUS, this identity will be available to authorize the connection
-#   and optionally assign a dynamic VLAN ID.
+# - Configured via CLIENT_IDENTITY or second script argument: ./generate-certs.sh <radius_ip> <client_identity>
 # ------------------------------------------------------------------------------
-CLIENT_IDENTITY="client-device-01"
-
 if [ ! -f "client.crt" ]; then
     echo "==> Creating Client Certificate (${CLIENT_IDENTITY})..."
     step certificate create "${CLIENT_IDENTITY}" client.crt client.key \

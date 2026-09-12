@@ -14,17 +14,17 @@ An enterprise-grade **802.1X Network Access Control (NAC)** system deployed on K
 
 ```mermaid
 graph TD
-    subgraph Client Layer
+    subgraph ClientLayer ["Client Layer"]
         Mac["Client Device (client-device-01)<br/>macOS / Apple Silicon<br/>P-384 EAP-TLS Identity"]
     end
 
-    subgraph UniFi Physical Network
+    subgraph UniFiNetwork ["UniFi Physical Network"]
         AP["UniFi AP (U6-Mesh)<br/>SSID: ENTERPRISE-WIFI<br/>WPA3-Enterprise 192-bit (AKM 12)<br/>Default: VLAN 250 (Quarantine)"]
         Switch["UniFi Switch (US-8-60W)<br/>Hardware ACL: global_mac_acl<br/>DENY ALL on VLAN 250"]
     end
 
-    subgraph "Kubernetes: k8s-cluster (Talos on Pi arm64)"
-        subgraph "Pod: freeradius-test (non-root UID 100)"
+    subgraph K8sCluster ["Kubernetes (Talos on Pi arm64)"]
+        subgraph PodRadius ["Pod: freeradius-test (non-root UID 100)"]
             RADIUS_AUTH["1812/UDP (NodePort 31812)"]
             RADIUS_ACCT["1813/UDP (NodePort 31813)"]
             RADSEC["2083/TCP (NodePort 32083)"]
@@ -36,8 +36,8 @@ graph TD
         K8S_CONFIG["ConfigMap: freeradius-config<br/>- clients.conf<br/>- eap module<br/>- authorize"]
     end
 
-    subgraph Target Network Segments
-        VLAN80["VLAN 80: Authenticated Production<br/>Subnet: 10.10.10.0/24<br/>Inter-VLAN Firewall Blocked"]
+    subgraph NetworkSegments ["Target Network Segments"]
+        VLAN10["VLAN 10: Authenticated Production<br/>Subnet: 10.10.10.0/24<br/>Inter-VLAN Firewall Blocked"]
         VLAN250["VLAN 250: Quarantine (Zero Routing)<br/>No DHCP / Isolated L2 Broadcast"]
     end
 
@@ -48,8 +48,8 @@ graph TD
     K8S_SECRET -.->|"Mounted Read-Only"| Core
     K8S_CONFIG -.->|"Mounted Read-Only"| Core
     
-    Core -->|"3. Access-Accept: Tunnel-Private-Group-Id = '80'"| AP
-    AP -->|"4. Dynamic Placement onto VLAN 80"| VLAN80
+    Core -->|"3. Access-Accept: Tunnel-Private-Group-Id = '10'"| AP
+    AP -->|"4. Dynamic Placement onto VLAN 10"| VLAN10
     AP -.->|"Unauthenticated / Rejected Fallback"| VLAN250
     Switch -.->|"Enforces L2 MAC drop"| VLAN250
 ```
@@ -70,7 +70,6 @@ This implementation strictly adheres to the **NSA CNSA 1.0 (Suite B 192-bit)** s
 | **Management Frames** | **BIP-GMAC-256 (PMF Mandatory)** | Protected Management Frames enforced; non-PMF clients blocked. |
 | **Session Cache Policy** | **Disabled (`cache { enable = no }`)** | Enforces full mutual TLS handshake on every reconnection (no session resumption). |
 
-
 ---
 
 ## Network Architecture & Quarantine Design
@@ -84,26 +83,38 @@ The wireless SSID (`ENTERPRISE-WIFI`) is configured with its default network map
   deny any any vlan eq 250
   exit
   ```
-  Bound `inbound` on all physical switch ports `0/1` through `0/8`. Unauthenticated clients placed in VLAN 250 cannot send or receive frames laterally or vertically.
+  Bound `inbound` on physical switch ports. Unauthenticated clients placed in VLAN 250 cannot send or receive frames laterally or vertically.
 
 ### 2. Dynamic RFC 3580 VLAN Steering
 Upon successful mutual EAP-TLS authentication of identity `client-device-01`, FreeRADIUS injects standard RADIUS tunnel attributes into the `Access-Accept` response:
 ```text
 Tunnel-Type = VLAN (13)
 Tunnel-Medium-Type = IEEE-802 (6)
-Tunnel-Private-Group-Id = "80"
+Tunnel-Private-Group-Id = "10"
 ```
-The UniFi AP dynamically re-tags the client's wireless session and bridges it into **VLAN 80** (`10.10.10.0/24`).
+The UniFi AP dynamically re-tags the client's wireless session and bridges it into **VLAN 10** (`10.10.10.0/24`).
 
 ### 3. Inter-VLAN Firewall Isolation
-Workstations on VLAN 80 (`10.10.10.0/24`) have full internet access but are categorically prohibited by gateway firewall rules from routing into management VLAN 50 (`10.50.0.0/24`), protecting the Talos Kubernetes cluster from lateral access.
+Workstations on VLAN 10 (`10.10.10.0/24`) have full internet access but are prohibited by gateway firewall rules from routing into management VLAN 50 (`10.50.0.0/24`), protecting the Talos Kubernetes cluster from lateral access.
 
 ---
 
-## Deployment Guide
+## Deployment Patterns: Public Base vs. Private Overlay
+
+To allow keeping this repository public on GitHub while maintaining complete privacy and version control over your actual homelab parameters (real SSIDs, VLAN IDs, client identities, and AP shared secrets):
+
+1. **Public Base (This Repository):**
+   - Contains generic manifests, `.example` configuration templates, and sanitized test harnesses.
+2. **Private Overlay (Your Private Repository):**
+   - A separate private Git repository that consumes this repo as a remote Kustomize base and injects your real configurations.
+   - See [examples/private-overlay](examples/private-overlay) for complete setup instructions and template manifests.
+
+---
+
+## Quick Start (Base Manifests)
 
 ### 1. Prerequisites
-* **Local Tools:** `git`, `step` (Smallstep CLI), `openssl` (LibreSSL/OpenSSL), `kubectl`, `kustomize`, `docker` / `podman`.
+* **Local Tools:** `git`, `step` (Smallstep CLI), `openssl`, `kubectl`, `kustomize`, `docker` / `podman`.
 * **Hardware:** UniFi Access Point (Wi-Fi 6 / U6 or newer supporting WPA3-Enterprise 192-bit) and UniFi Switch.
 * **Cluster:** Kubernetes cluster (e.g. Talos Linux) with node IP reachable by the UniFi AP.
 
@@ -111,7 +122,7 @@ Workstations on VLAN 80 (`10.10.10.0/24`) have full internet access but are cate
 Run the automated generation script to create the full NIST P-384 certificate hierarchy:
 ```bash
 cd certificate-authority
-./generate-certs.sh
+./generate-certs.sh client-device-01
 ```
 
 To export the macOS client identity bundle:
@@ -123,21 +134,25 @@ To export the macOS client identity bundle:
     -out client.p12
 ```
 
-### 3. Deploy to Kubernetes
-1. Copy [`k8s/config/clients.conf.example`](k8s/config/clients.conf.example) to `k8s/config/clients.conf` (gitignored) and configure your NAS clients, AP/workstation IPs, and RADIUS secrets.
-2. Generate GitHub Container Registry secret (if pulling private image):
-   ```bash
-   ./k8s/setup-ghcr-auth.sh <GITHUB_USERNAME> <GITHUB_PAT>
-   ```
-3. Apply the manifests using Kustomize:
-   ```bash
-   kubectl apply -k .
-   ```
-4. Verify pod health and tail logs:
-   ```bash
-   kubectl get pods -n freeradius-experimentation
-   kubectl logs -n freeradius-experimentation -l app=freeradius -f
-   ```
+### 3. Configure Local Overrides
+Copy the configuration templates:
+```bash
+cp k8s/config/clients.conf.example k8s/config/clients.conf
+cp k8s/config/authorize.example k8s/config/authorize
+```
+*(Both `clients.conf` and `authorize` are ignored by Git so your real network values remain private).*
+
+### 4. Deploy to Kubernetes
+Apply the manifests using Kustomize:
+```bash
+kubectl apply -k .
+```
+
+Verify pod health and tail logs:
+```bash
+kubectl get pods -n freeradius-experimentation
+kubectl logs -n freeradius-experimentation -l app=freeradius -f
+```
 
 ---
 
@@ -148,7 +163,7 @@ Before testing over physical Wi-Fi, run the containerized `eapol_test` suite to 
 ```bash
 ./test/run-test.sh
 ```
-* **Success Criteria:** Completes full TLS 1.2 handshake (`ECDHE-ECDSA-AES256-GCM-SHA384`), derives MPPE send/receive keys, and receives `Tunnel-Private-Group-Id = "80"`.
+* **Success Criteria:** Completes full TLS 1.2 handshake (`ECDHE-ECDSA-AES256-GCM-SHA384`), derives MPPE send/receive keys, and receives `Tunnel-Private-Group-Id = "10"` (or your local configured VLAN).
 
 ### 2. Over-the-Air Physical Wi-Fi Verification
 1. Associate client with SSID `ENTERPRISE-WIFI`.
@@ -159,7 +174,7 @@ Before testing over physical Wi-Fi, run the containerized `eapol_test` suite to 
    ```
 3. Dissect raw over-the-air beacon frames via `tshark`:
    ```bash
-   tshark -r capture.pcap -Y "wlan.rsn.akms.type == 12" -V | grep -A 10 "Tag: RSN Information"
+   tshark -r ./wifi_cnsa_capture.pcap -Y "wlan.rsn.akms.type == 12" -V | grep -A 10 "Tag: RSN Information"
    ```
    Confirms `GCMP (256)` group/pairwise ciphers and `WPA (SHA384-SuiteB) (12)`.
 
@@ -183,4 +198,3 @@ Detailed implementation plans for upcoming milestones are documented in [`notes/
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-

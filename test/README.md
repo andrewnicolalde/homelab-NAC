@@ -19,7 +19,7 @@ This directory provides an automated, containerized test harness using `eapol_te
    - Asserts that FreeRADIUS returns:
      - `Tunnel-Type = VLAN (13)`
      - `Tunnel-Medium-Type = IEEE-802 (6)`
-     - `Tunnel-Private-Group-Id = "80"`
+     - `Tunnel-Private-Group-Id = "10"`
 
 ### What requires physical Wi-Fi (Cannot be tested via `eapol_test`):
 - **Over-the-Air L2 Encryption:** The 802.11 4-Way Handshake negotiating GCMP-256 pairwise frame encryption and BIP-GMAC-256 Protected Management Frames (PMF) between the AP's radio hardware and the Apple device's Wi-Fi chip.
@@ -101,8 +101,8 @@ Output:
 Capturing raw 802.11 beacon frames off the airwaves (e.g. using macOS Wireless Diagnostics Sniffer or an AP capture) and dissecting the IEEE 802.11 RSN Information Element via `tshark`:
 
 ```bash
-andrew@client-device-01 Developer/talos-k8s-cluster » /Applications/Wireshark.app/Contents/MacOS/tshark \
-  -r ~/Desktop/client-device-01_ch36_2026-09-06_22.41.07.961.pcap \
+tshark \
+  -r ./wifi_cnsa_capture.pcap \
   -Y "wlan.rsn.akms.type == 12" -V | grep -A 22 "Tag: RSN Information" | head -n 23
 
         Tag: RSN Information
