@@ -23,8 +23,5 @@ secretGenerator:
   - name: freeradius-certs
     behavior: replace
     files:
-      - ca.crt=./certs/root_ca.crt
-      - server.crt=./certs/server.crt
-      - server.key=./certs/server.key
-      - ca.pem=./certs/ca.pem
-      - server.pem=./certs/server.pem
+      - server.pem=./certs/radius-server/server.pem
+      - ca.pem=./certs/user-client-devices/user_root_ca.crt

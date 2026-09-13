@@ -15,11 +15,17 @@ homelab-network-private/
 ├── authorize                # Real device names mapped to production VLANs
 ├── eap                      # Custom EAP parameters (if overriding)
 └── certs/
-    ├── root_ca.crt
-    ├── server.crt
-    ├── server.key
-    ├── ca.pem
-    └── server.pem
+    ├── radius-server/
+    │   ├── server_root_ca.crt
+    │   └── server.pem
+    ├── user-client-devices/
+    │   ├── user_root_ca.crt
+    │   └── <device-name>/
+    │       └── <device-name>.p12
+    └── network-infrastructure-authenticators/
+        ├── authenticators_root_ca.crt
+        ├── authenticator.crt
+        └── authenticator.key
 ```
 
 ---
@@ -50,11 +56,8 @@ secretGenerator:
   - name: freeradius-certs
     behavior: replace
     files:
-      - ca.crt=./certs/root_ca.crt
-      - server.crt=./certs/server.crt
-      - server.key=./certs/server.key
-      - ca.pem=./certs/ca.pem
-      - server.pem=./certs/server.pem
+      - server.pem=./certs/radius-server/server.pem
+      - ca.pem=./certs/user-client-devices/user_root_ca.crt
 ```
 
 ---

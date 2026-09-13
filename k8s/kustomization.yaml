@@ -11,9 +11,6 @@ resources:
 secretGenerator:
   - name: freeradius-certs
     literals:
-      - ca.crt="PLACEHOLDER_REPLACE_IN_OVERLAY"
-      - server.crt="PLACEHOLDER_REPLACE_IN_OVERLAY"
-      - server.key="PLACEHOLDER_REPLACE_IN_OVERLAY"
       - ca.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
       - server.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
 
