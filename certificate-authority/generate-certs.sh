@@ -32,11 +32,14 @@ Certificate Generation Script for 802.1X / EAP-TLS (CNSA P-384)
 
 Usage:
   $(basename "$0") --full-with-defaults [options]
+  $(basename "$0") --server [options]
   $(basename "$0") --client <identity> [options]
 
 Modes (one required):
   --full-with-defaults    Generate complete infrastructure suite (Server PKI,
                           UniFi AP PKI, and default workstation client)
+  --server                Generate/rotate credentials exclusively for the FreeRADIUS
+                          server (server.crt, server.key, server.pem) signed by Slot 9c
   --client <identity>     Generate credentials exclusively for a specific client
                           device (<identity>.crt, <identity>.key, <identity>.p12)
 
@@ -75,6 +78,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --full-with-defaults)
             RUN_MODE="full"
+            shift
+            ;;
+        --server)
+            RUN_MODE="server"
             shift
             ;;
         --client)
@@ -120,7 +127,7 @@ set -- "${POSITIONAL_ARGS[@]:+${POSITIONAL_ARGS[@]}}"
 # Enforce explicit execution mode
 if [ -z "${RUN_MODE}" ]; then
     echo "❌ Error: No execution mode specified." >&2
-    echo "   You must specify either --full-with-defaults or --client <identity>." >&2
+    echo "   You must specify either --full-with-defaults, --server, or --client <identity>." >&2
     echo "" >&2
     show_usage >&2
     exit 1
@@ -139,6 +146,8 @@ elif [ -f "${SCRIPT_DIR}/certs.env" ]; then
 fi
 
 RADIUS_IP="${1:-${RADIUS_IP:-10.50.0.100}}"
+RADIUS_SERVER_NAME="${RADIUS_SERVER_NAME:-}"
+SERVER_SUBJECT="${RADIUS_SERVER_NAME:-${RADIUS_IP}}"
 CLIENT_IDENTITY="${2:-${CLIENT_IDENTITY:-client-device-01}}"
 ROOT_CA_NAME="${ROOT_CA_NAME:-Enterprise Root CA}"
 AP_IDENTITY="${AP_IDENTITY:-unifi-aps}"
@@ -160,8 +169,11 @@ echo "==========================================================================
 echo "  Mode            : $([ "${USE_YUBIKEY}" = "true" ] && echo "YubiKey Hardware Root of Trust (3-CA)" || echo "Software Root CA (Disk-backed)")"
 if [ "${RUN_MODE}" = "full" ]; then
 echo "  Action          : Full Infrastructure Bootstrap (--full-with-defaults)"
-echo "  RADIUS Server IP: ${RADIUS_IP}"
+echo "  RADIUS Server   : ${SERVER_SUBJECT} (${RADIUS_IP})"
 echo "  Default Client  : ${CLIENT_IDENTITY}"
+elif [ "${RUN_MODE}" = "server" ]; then
+echo "  Action          : Server Certificate Generation/Rotation (--server)"
+echo "  RADIUS Server   : ${SERVER_SUBJECT} (${RADIUS_IP})"
 else
 echo "  Action          : Client Device Onboarding (--client)"
 echo "  Client Identity : ${TARGET_CLIENT}"
@@ -177,7 +189,10 @@ if [ -z "${ADDITIONAL_SANS+x}" ]; then
     ADDITIONAL_SANS=()
 fi
 
-SERVER_SAN_ARGS=(--san "${RADIUS_IP}")
+SERVER_SAN_ARGS=(--san "${SERVER_SUBJECT}")
+if [ -n "${RADIUS_SERVER_NAME}" ] && [ "${RADIUS_SERVER_NAME}" != "${RADIUS_IP}" ]; then
+    SERVER_SAN_ARGS+=(--san "${RADIUS_IP}")
+fi
 if [ "${#ADDITIONAL_SANS[@]}" -gt 0 ]; then
     for san in "${ADDITIONAL_SANS[@]}"; do
         SERVER_SAN_ARGS+=(--san "${san}")
@@ -304,7 +319,52 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
     fi
 
     # ==========================================================================
-    # BRANCH B: Full Infrastructure Bootstrap Mode (--full-with-defaults)
+    # BRANCH B: Server Certificate Mode (--server)
+    # ==========================================================================
+    if [ "${RUN_MODE}" = "server" ]; then
+        echo ""
+        echo "--- RADIUS Server PKI (Slot ${SLOT_SERVER_CA}) ---"
+        if [ ! -f "server_root_ca.crt" ]; then
+            echo "❌ Error: server_root_ca.crt not found in ${OUTPUT_DIR}." >&2
+            echo "   Please run with --full-with-defaults first to initialize the PKI." >&2
+            exit 1
+        fi
+
+        if [ -f "server.crt" ] && [ "${FORCE}" != "true" ]; then
+            echo "==> server.crt already exists. Skipping (use --force to overwrite)."
+        else
+            echo "==> Creating FreeRADIUS Server Certificate for ${SERVER_SUBJECT}..."
+            echo "    >>> Touch your YubiKey when LED flashes <<<"
+            step certificate create "${SERVER_SUBJECT}" server.crt server.key \
+                --profile leaf \
+                --ca server_root_ca.crt \
+                --ca-key "${KEY_URI_SERVER}" \
+                --kty EC --curve "${CURVE}" \
+                "${SERVER_SAN_ARGS[@]:+${SERVER_SAN_ARGS[@]}}" \
+                --not-after=8760h \
+                --no-password --insecure \
+                "${FORCE_ARG[@]:+${FORCE_ARG[@]}}"
+            echo "✔ Created: server.crt, server.key"
+        fi
+
+        if [ -f "server.crt" ] && [ -f "server.key" ]; then
+            cat server.crt server.key > server.pem
+            chmod 600 server.pem
+            echo "✔ Created combined server.pem for Alpine FreeRADIUS"
+        fi
+
+        echo ""
+        echo "=============================================================================="
+        echo "FreeRADIUS Server certificate successfully generated in ${OUTPUT_DIR}:"
+        echo "  - Certificate : server.crt (Subject: ${SERVER_SUBJECT})"
+        echo "  - Private Key : server.key"
+        echo "  - Combined PEM: server.pem"
+        echo "=============================================================================="
+        exit 0
+    fi
+
+    # ==========================================================================
+    # BRANCH C: Full Infrastructure Bootstrap Mode (--full-with-defaults)
     # ==========================================================================
     # --------------------------------------------------------------------------
     # YubiKey CA 1: RADIUS Server Root CA (Slot 9c) & Server Leaf Cert
@@ -509,6 +569,48 @@ else
         echo "  - Certificate : ${CLIENT_CRT}"
         echo "  - Private Key : ${CLIENT_KEY}"
         echo "  - PKCS#12     : ${CLIENT_P12}"
+        echo "=============================================================================="
+        exit 0
+    fi
+
+    # ==========================================================================
+    # BRANCH B: Server Certificate Mode (--server)
+    # ==========================================================================
+    if [ "${RUN_MODE}" = "server" ]; then
+        if [ ! -f "root_ca.crt" ] || [ ! -f "root_ca.key" ]; then
+            echo "❌ Error: root_ca.crt / root_ca.key not found in ${OUTPUT_DIR}." >&2
+            echo "   Please run with --full-with-defaults first to initialize the PKI." >&2
+            exit 1
+        fi
+
+        if [ -f "server.crt" ] && [ "${FORCE}" != "true" ]; then
+            echo "==> server.crt already exists. Skipping (use --force to overwrite)."
+        else
+            echo "==> Creating FreeRADIUS Server Certificate for ${SERVER_SUBJECT}..."
+            step certificate create "${SERVER_SUBJECT}" server.crt server.key \
+                --profile leaf \
+                --ca root_ca.crt \
+                --ca-key root_ca.key \
+                --kty EC --curve "${CURVE}" \
+                "${SERVER_SAN_ARGS[@]:+${SERVER_SAN_ARGS[@]}}" \
+                --not-after=8760h \
+                --no-password --insecure \
+                "${FORCE_ARG[@]:+${FORCE_ARG[@]}}"
+            echo "✔ Created: server.crt, server.key"
+        fi
+
+        if [ -f "server.crt" ] && [ -f "server.key" ]; then
+            cat server.crt server.key > server.pem
+            chmod 600 server.pem
+            echo "✔ Created combined server.pem for Alpine FreeRADIUS"
+        fi
+
+        echo ""
+        echo "=============================================================================="
+        echo "FreeRADIUS Server certificate successfully generated in ${OUTPUT_DIR}:"
+        echo "  - Certificate : server.crt (Subject: ${SERVER_SUBJECT})"
+        echo "  - Private Key : server.key"
+        echo "  - Combined PEM: server.pem"
         echo "=============================================================================="
         exit 0
     fi
