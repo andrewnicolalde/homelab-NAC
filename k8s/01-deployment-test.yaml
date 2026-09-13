@@ -26,7 +26,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: freeradius
-          image: ghcr.io/andrewnicolalde/homelab-nac/freeradius:latest
+          image: ghcr.io/andrewnicolalde/homelab-nac/freeradius@sha256:b74e8d0cf81d4e37b4601e2c45225c9f78f350d8ad7ff27c81f0964d3f09757c
+          imagePullPolicy: IfNotPresent
           args: ["-X"]
           securityContext:
             allowPrivilegeEscalation: false
