@@ -46,20 +46,8 @@ spec:
               protocol: UDP
           volumeMounts:
             - name: certs
-              mountPath: /etc/raddb/certs/ca.crt
-              subPath: ca.crt
-              readOnly: true
-            - name: certs
               mountPath: /etc/raddb/certs/ca.pem
               subPath: ca.pem
-              readOnly: true
-            - name: certs
-              mountPath: /etc/raddb/certs/server.crt
-              subPath: server.crt
-              readOnly: true
-            - name: certs
-              mountPath: /etc/raddb/certs/server.key
-              subPath: server.key
               readOnly: true
             - name: certs
               mountPath: /etc/raddb/certs/server.pem
