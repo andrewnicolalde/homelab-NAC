@@ -162,9 +162,7 @@ elif [ -f "${SCRIPT_DIR}/certs.env" ]; then
     source "${SCRIPT_DIR}/certs.env"
 fi
 
-RADIUS_IP="${1:-${RADIUS_IP:-10.50.0.100}}"
-RADIUS_SERVER_NAME="${RADIUS_SERVER_NAME:-}"
-SERVER_SUBJECT="${RADIUS_SERVER_NAME:-${RADIUS_IP}}"
+RADIUS_SERVER_NAME="${RADIUS_SERVER_NAME:-radius.internal.example.com}"
 ROOT_CA_NAME="${ROOT_CA_NAME:-Enterprise Root CA}"
 AP_IDENTITY="${AP_IDENTITY:-unifi-aps}"
 CURVE="${CURVE:-P-384}"
@@ -188,10 +186,10 @@ echo "==========================================================================
 echo "  Mode            : $([ "${USE_YUBIKEY}" = "true" ] && echo "YubiKey Hardware Root of Trust (3-CA)" || echo "Software Root CA (Disk-backed)")"
 if [ "${RUN_MODE}" = "full" ]; then
     echo "  Action          : Full Infrastructure Bootstrap (--full-with-defaults)"
-    echo "  RADIUS Server   : ${SERVER_SUBJECT} (${RADIUS_IP})"
+    echo "  RADIUS Server   : ${RADIUS_SERVER_NAME}"
 elif [ "${RUN_MODE}" = "server" ]; then
     echo "  Action          : Server Certificate Generation/Rotation (--server)"
-    echo "  RADIUS Server   : ${SERVER_SUBJECT} (${RADIUS_IP})"
+    echo "  RADIUS Server   : ${RADIUS_SERVER_NAME}"
 else
     echo "  Action          : Client Device Onboarding (--client)"
     echo "  Client Identity : ${TARGET_CLIENT}"
@@ -210,10 +208,7 @@ if [ -z "${ADDITIONAL_SANS+x}" ]; then
     ADDITIONAL_SANS=()
 fi
 
-SERVER_SAN_ARGS=(--san "${SERVER_SUBJECT}")
-if [ -n "${RADIUS_SERVER_NAME}" ] && [ "${RADIUS_SERVER_NAME}" != "${RADIUS_IP}" ]; then
-    SERVER_SAN_ARGS+=(--san "${RADIUS_IP}")
-fi
+SERVER_SAN_ARGS=(--san "${RADIUS_SERVER_NAME}")
 if [ "${#ADDITIONAL_SANS[@]}" -gt 0 ]; then
     for san in "${ADDITIONAL_SANS[@]}"; do
         SERVER_SAN_ARGS+=(--san "${san}")
@@ -345,9 +340,9 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
             TMP_SERVER_CRT="${SERVER_DIR}/server.crt.tmp"
             TMP_SERVER_KEY="${SERVER_DIR}/server.key.tmp"
 
-            echo "==> Creating FreeRADIUS Server Certificate for ${SERVER_SUBJECT}..."
+            echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_SERVER_NAME}..."
             echo "    >>> Touch your YubiKey when LED flashes <<<"
-            step certificate create "${SERVER_SUBJECT}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
+            step certificate create "${RADIUS_SERVER_NAME}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
                 --profile leaf \
                 --ca "${SERVER_DIR}/server_root_ca.crt" \
                 --ca-key "${KEY_URI_SERVER}" \
@@ -397,9 +392,9 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
         TMP_SERVER_CRT="${SERVER_DIR}/server.crt.tmp"
         TMP_SERVER_KEY="${SERVER_DIR}/server.key.tmp"
 
-        echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_IP}..."
+        echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_SERVER_NAME}..."
         echo "    >>> Touch your YubiKey when LED flashes <<<"
-        step certificate create "${RADIUS_IP}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
+        step certificate create "${RADIUS_SERVER_NAME}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
             --profile leaf \
             --ca "${SERVER_DIR}/server_root_ca.crt" \
             --ca-key "${KEY_URI_SERVER}" \
@@ -557,8 +552,8 @@ else
             TMP_SERVER_CRT="${SERVER_DIR}/server.crt.tmp"
             TMP_SERVER_KEY="${SERVER_DIR}/server.key.tmp"
 
-            echo "==> Creating FreeRADIUS Server Certificate for ${SERVER_SUBJECT}..."
-            step certificate create "${SERVER_SUBJECT}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
+            echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_SERVER_NAME}..."
+            step certificate create "${RADIUS_SERVER_NAME}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
                 --profile leaf \
                 --ca "${SERVER_DIR}/server_root_ca.crt" \
                 --ca-key "${SERVER_DIR}/server_root_ca.key" \
@@ -599,8 +594,8 @@ else
         TMP_SERVER_CRT="${SERVER_DIR}/server.crt.tmp"
         TMP_SERVER_KEY="${SERVER_DIR}/server.key.tmp"
 
-        echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_IP}..."
-        step certificate create "${RADIUS_IP}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
+        echo "==> Creating FreeRADIUS Server Certificate for ${RADIUS_SERVER_NAME}..."
+        step certificate create "${RADIUS_SERVER_NAME}" "${TMP_SERVER_CRT}" "${TMP_SERVER_KEY}" \
             --profile leaf \
             --ca "${SERVER_DIR}/server_root_ca.crt" \
             --ca-key "${SERVER_DIR}/server_root_ca.key" \

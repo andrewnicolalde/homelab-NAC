@@ -80,10 +80,9 @@ kubectl apply -k .
 
 To configure site-specific parameters when generating certificates:
 1. Copy `certs.env.example` to `certs.env` in your private repository.
-2. Configure your server IP and identities:
+2. Configure your server hostname and identities:
    ```bash
-   RADIUS_IP="10.50.0.100"
-   CLIENT_IDENTITY="client-device-01"
+   RADIUS_SERVER_NAME="radius.internal.example.com"
    ROOT_CA_NAME="Enterprise Root CA"
    ```
 3. Run `./generate-certs.sh --full-with-defaults` for the complete bootstrap, or `./generate-certs.sh --client client-device-02` to issue credentials for a new device. The generator automatically sources `certs.env` if present.
