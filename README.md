@@ -353,6 +353,7 @@ Technical details and implementation notes are documented in [`notes/client_hard
 * [x] **YubiKey Hardware Root of Trust:** 3-CA architecture using YubiKey PIV with `ECCP384` and `TOUCH_POLICY_ALWAYS`.
 * [x] **DNS FQDN Server SANs:** Compliant with modern 802.1X supplicant validation standards.
 * [x] **Automated macOS PBES1 PKCS#12 Packaging:** Turnkey client onboarding with automated trust chain bundling.
+* [ ] **Software Mode in `generate-certificate-authorities.sh`:** Add standalone disk-backed 3-CA generation and rotation to `generate-certificate-authorities.sh` (bringing standalone CA initialization parity to software mode).
 * [ ] **Scoped `.mobileconfig` Profiles:** Scoping Root CA trust exclusively to `ENTERPRISE-WIFI` via Apple Configuration Profile payloads (`PayloadCertificateAnchorUUID` and `TLSTrustedServerNames`), preventing web/HTTPS MITM exposure.
 * [ ] **Hardware-Backed Client Keys:** Generating client keys inside Apple Secure Enclave (`kSecAttrTokenIDSecureEnclave` / P-256) or YubiKey PIV Smart Card (P-384).
 * [ ] **RADIUS Dynamic Authorization / CoA (RFC 3576):** Change of Authorization disconnect messages for immediate session termination.

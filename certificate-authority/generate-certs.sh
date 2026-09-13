@@ -183,7 +183,7 @@ mkdir -p "${SERVER_DIR}" "${USER_DIR}" "${INFRA_DIR}"
 echo "=============================================================================="
 echo "  CNSA 192-bit Certificate Generation (step CLI)"
 echo "=============================================================================="
-echo "  Mode            : $([ "${USE_YUBIKEY}" = "true" ] && echo "YubiKey Hardware Root of Trust (3-CA)" || echo "Software Root CA (Disk-backed)")"
+echo "  Mode            : $([ "${USE_YUBIKEY}" = "true" ] && echo "YubiKey Hardware Root of Trust (3-CA)" || echo "Software Root CAs (Disk-backed 3-CA)")"
 if [ "${RUN_MODE}" = "full" ]; then
     echo "  Action          : Full Infrastructure Bootstrap (--full-with-defaults)"
     echo "  RADIUS Server   : ${RADIUS_SERVER_NAME}"
