@@ -1,4 +1,4 @@
-FROM alpine:latest
+FROM alpine:3.24.1
 
 # Install official Alpine packages for FreeRADIUS (compiled for aarch64 on arm64 hardware)
 RUN apk add --no-cache \
