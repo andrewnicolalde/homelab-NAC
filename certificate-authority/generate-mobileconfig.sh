@@ -14,8 +14,8 @@
 # Security Design:
 #   - WPA3-Enterprise only (hard-coded, non-configurable)
 #   - EAP-TLS only (hard-coded, non-configurable)
-#   - TLS 1.2 minimum (hard-coded, non-configurable)
-#   - Dynamic trust exceptions disabled (hard-coded)
+#   - TLS 1.2 only (hard-coded, non-configurable)
+#   - Static trust pinning via PayloadCertificateAnchorUUID (hard-coded)
 #   - PKCS#12 password is NOT embedded — users must enter it at install time
 #     (the password must be transmitted/received out-of-band)
 #   - Profiles are generated unsigned (signing is planned for a future version)
@@ -52,8 +52,8 @@ Generates a .mobileconfig profile for WPA3-Enterprise EAP-TLS authentication.
 Security properties (hard-coded, non-configurable):
   - Encryption     : WPA3-Enterprise only
   - Authentication : EAP-TLS only (type 13)
-  - TLS Version    : TLS 1.2 minimum
-  - Trust          : Strict server validation (no trust exceptions)
+  - TLS Version    : TLS 1.2 only
+  - Trust          : Static server validation via PayloadCertificateAnchorUUID
   - P12 Password   : NOT embedded (entered by user at install time)
   - Profile Signing: Unsigned (signing planned for future version)
 
@@ -206,7 +206,7 @@ fi
 # Verify macOS tooling is available
 if [ ! -x "${PLISTBUDDY}" ]; then
     echo "❌ Error: PlistBuddy not found at ${PLISTBUDDY}." >&2
-    echo "   This script requires macOS." >&2
+    echo "   This script must be run on macOS." >&2
     exit 1
 fi
 
@@ -228,7 +228,7 @@ echo ""
 echo "  Security:"
 echo "    Encryption    : WPA3-Enterprise (hard-coded)"
 echo "    Auth Method   : EAP-TLS only (hard-coded)"
-echo "    TLS Minimum   : 1.2 (hard-coded)"
+echo "    TLS Version   : 1.2 only"
 echo "    P12 Password  : NOT embedded (user enters at install)"
 echo "    Signing       : Unsigned"
 echo "=============================================================================="
@@ -239,6 +239,7 @@ echo "==========================================================================
 
 # Create a secure temporary directory for intermediate files
 TMPDIR_WORK="$(mktemp -d)"
+chmod 700 "${TMPDIR_WORK}"
 trap 'rm -rf "${TMPDIR_WORK}"' EXIT INT TERM
 
 # Detect if Server CA is PEM or DER and convert to DER
@@ -378,7 +379,7 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:HIDDEN_NETWORK bool false" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:AutoJoin bool true" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:ProxyType string None" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:CaptiveBypass bool false" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:2:CaptiveBypass bool true" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:DisableAssociationMACRandomization bool false" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:IsHotspot bool false" "${PLIST_FILE}"
 
@@ -395,8 +396,9 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:AcceptEAPTypes array" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:AcceptEAPTypes:0 integer 13" "${PLIST_FILE}"
 
-# TLS 1.2 minimum — hard-coded, non-configurable
+# TLS 1.2 only (minimum and maximum pinned to 1.2) — hard-coded, CNSA requirement
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSMinimumVersion string 1.2" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSMaximumVersion string 1.2" "${PLIST_FILE}"
 
 # Server trust anchors: reference the Root CA payload UUID
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:PayloadCertificateAnchorUUID array" "${PLIST_FILE}"
@@ -406,8 +408,6 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSTrustedServerNames array" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSTrustedServerNames:0 string '${RADIUS_SERVER_NAME}'" "${PLIST_FILE}"
 
-# Disable dynamic trust exceptions — hard-coded, non-configurable
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSAllowTrustExceptions bool false" "${PLIST_FILE}"
 
 # ==============================================================================
 # 5. Finalize: Convert to XML and validate
