@@ -242,25 +242,9 @@ TMPDIR_WORK="$(mktemp -d)"
 chmod 700 "${TMPDIR_WORK}"
 trap 'rm -rf "${TMPDIR_WORK}"' EXIT INT TERM
 
-# Detect if Server CA is PEM or DER and convert to DER
-detect_and_convert_to_der() {
-    local input_path="$1"
-    local output_der="$2"
-
-    if head -1 "${input_path}" | grep -q "BEGIN CERTIFICATE"; then
-        echo "  → Server CA is PEM-encoded, converting to DER..."
-        openssl x509 -in "${input_path}" -outform der -out "${output_der}" 2>/dev/null
-    else
-        echo "  → Server CA is DER-encoded, using as-is..."
-        cp "${input_path}" "${output_der}"
-    fi
-}
-
-SERVER_CA_DER="${TMPDIR_WORK}/server_ca.der"
-detect_and_convert_to_der "${SERVER_CA_PATH}" "${SERVER_CA_DER}"
-
-# Verify the DER file is a valid X.509 certificate
-if ! openssl x509 -inform der -in "${SERVER_CA_DER}" -noout 2>/dev/null; then
+# Verify the Server CA file is a valid X.509 certificate (supports PEM and DER)
+if ! openssl x509 -in "${SERVER_CA_PATH}" -noout 2>/dev/null && \
+   ! openssl x509 -inform der -in "${SERVER_CA_PATH}" -noout 2>/dev/null; then
     echo "❌ Error: Server CA file is not a valid X.509 certificate: ${SERVER_CA_PATH}" >&2
     exit 1
 fi
@@ -287,8 +271,8 @@ generate_uuid_from_hash() {
     echo "${hash:0:8}-${hash:8:4}-${hash:12:4}-${hash:16:4}-${hash:20:12}" | tr '[:lower:]' '[:upper:]'
 }
 
-# UUID for the Root CA payload (derived from the DER certificate content)
-SERVER_CA_HASH=$(shasum -a 256 "${SERVER_CA_DER}" | cut -c1-64)
+# UUID for the Root CA payload (derived from certificate file content)
+SERVER_CA_HASH=$(shasum -a 256 "${SERVER_CA_PATH}" | cut -c1-64)
 UUID_ROOT_CA=$(generate_uuid_from_hash "root-ca:${SERVER_CA_HASH}")
 
 # UUID for the PKCS#12 identity payload (derived from the P12 file content)
@@ -342,9 +326,9 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDisplayName string 'RADIUS Server Root CA'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDescription string 'Root CA for 802.1X RADIUS server authentication'" "${PLIST_FILE}"
 
-# Import the DER certificate as binary data — PlistBuddy's Import command
+# Import the certificate as binary data — PlistBuddy's Import command
 # reads the raw file bytes and stores them as a <data> field in the plist.
-"${PLISTBUDDY}" -c "Import :PayloadContent:0:PayloadContent '${SERVER_CA_DER}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Import :PayloadContent:0:PayloadContent '${SERVER_CA_PATH}'" "${PLIST_FILE}"
 
 # --------------------------------------------------------------------------
 # Payload 1: Client Identity PKCS#12 (com.apple.security.pkcs12)
