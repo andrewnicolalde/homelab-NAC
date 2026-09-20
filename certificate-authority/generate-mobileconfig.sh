@@ -325,6 +325,7 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadUUID string '${UUID_ROOT_CA}'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDisplayName string 'RADIUS Server Root CA'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDescription string 'Root CA for 802.1X RADIUS server authentication'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadCertificateFileName string '$(basename "${SERVER_CA_PATH}")'" "${PLIST_FILE}"
 
 # Import the certificate as binary data — PlistBuddy's Import command
 # reads the raw file bytes and stores them as a <data> field in the plist.
@@ -340,6 +341,7 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadUUID string '${UUID_CLIENT_IDENTITY}'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadDisplayName string '${CLIENT_NAME} Client Identity'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadDescription string 'Client certificate and private key for EAP-TLS authentication'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadCertificateFileName string '$(basename "${CLIENT_P12_PATH}")'" "${PLIST_FILE}"
 
 # Import the PKCS#12 file as binary data.
 # NOTE: The Password key is intentionally omitted. The user will be prompted
