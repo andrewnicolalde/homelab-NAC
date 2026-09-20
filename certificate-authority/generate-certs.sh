@@ -64,6 +64,8 @@ Options:
   --config, -c <file>     Path to environment configuration file (e.g. certs.env)
   --output-dir, -o <dir>  Target directory for generated certificates (default: cwd)
   --yubikey               Use YubiKey hardware root of trust (3-CA architecture)
+  --mobileconfig          Generate Apple Configuration Profile (.mobileconfig) alongside
+                          client P12 (only valid with --client mode)
   --force, -f             Overwrite existing certificates/keys if already present
   --help, -h              Display this help message
 
@@ -76,6 +78,9 @@ Examples:
 
   # Force re-issuance of a specific client credential
   ./$(basename "$0") --client client-device-01 --force
+
+  # Onboard a new client device with .mobileconfig profile
+  ./$(basename "$0") --client client-device-01 --mobileconfig
 ==============================================================================
 EOF
 }
@@ -89,6 +94,7 @@ FORCE="false"
 CONFIG_FILE="${CONFIG_FILE:-${CERTS_ENV:-}}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 USE_YUBIKEY="${USE_YUBIKEY:-false}"
+GENERATE_MOBILECONFIG="false"
 
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -125,6 +131,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --yubikey)
             USE_YUBIKEY="true"
+            shift
+            ;;
+        --mobileconfig)
+            GENERATE_MOBILECONFIG="true"
             shift
             ;;
         --help|-h)
@@ -312,12 +322,34 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
             echo "✔ Cleaned up temporary unencrypted plaintext key and certificate"
         fi
 
+        # Generate .mobileconfig profile if requested
+        if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
+            MOBILECONFIG_SCRIPT="${SCRIPT_DIR}/generate-mobileconfig.sh"
+            if [ ! -f "${MOBILECONFIG_SCRIPT}" ]; then
+                echo "❌ Error: generate-mobileconfig.sh not found at ${MOBILECONFIG_SCRIPT}" >&2
+                exit 1
+            fi
+            MOBILECONFIG_FORCE_ARG=()
+            if [ "${FORCE}" = "true" ]; then
+                MOBILECONFIG_FORCE_ARG=(--force)
+            fi
+            echo ""
+            "${MOBILECONFIG_SCRIPT}" \
+                --server-ca "${SERVER_DIR}/server_root_ca.crt" \
+                --client-p12 "${CLIENT_P12}" \
+                --client-name "${TARGET_CLIENT}" \
+                "${MOBILECONFIG_FORCE_ARG[@]:+${MOBILECONFIG_FORCE_ARG[@]}}"
+        fi
+
         echo ""
         echo "=============================================================================="
         echo "Client credentials successfully provisioned:"
         echo "  - Identity    : ${TARGET_CLIENT}"
         echo "  - Directory   : ${CLIENT_DEVICE_DIR}"
         echo "  - PKCS#12     : ${CLIENT_P12}"
+        if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
+            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}.mobileconfig"
+        fi
         echo "=============================================================================="
         exit 0
     fi
@@ -528,12 +560,34 @@ else
             echo "✔ Created encrypted bundle: ${CLIENT_P12}"
         fi
 
+        # Generate .mobileconfig profile if requested
+        if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
+            MOBILECONFIG_SCRIPT="${SCRIPT_DIR}/generate-mobileconfig.sh"
+            if [ ! -f "${MOBILECONFIG_SCRIPT}" ]; then
+                echo "❌ Error: generate-mobileconfig.sh not found at ${MOBILECONFIG_SCRIPT}" >&2
+                exit 1
+            fi
+            MOBILECONFIG_FORCE_ARG=()
+            if [ "${FORCE}" = "true" ]; then
+                MOBILECONFIG_FORCE_ARG=(--force)
+            fi
+            echo ""
+            "${MOBILECONFIG_SCRIPT}" \
+                --server-ca "${SERVER_DIR}/server_root_ca.crt" \
+                --client-p12 "${CLIENT_P12}" \
+                --client-name "${TARGET_CLIENT}" \
+                "${MOBILECONFIG_FORCE_ARG[@]:+${MOBILECONFIG_FORCE_ARG[@]}}"
+        fi
+
         echo ""
         echo "=============================================================================="
         echo "Client credentials successfully provisioned:"
         echo "  - Identity    : ${TARGET_CLIENT}"
         echo "  - Directory   : ${CLIENT_DEVICE_DIR}"
         echo "  - PKCS#12     : ${CLIENT_P12}"
+        if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
+            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}.mobileconfig"
+        fi
         echo "=============================================================================="
         exit 0
     fi
