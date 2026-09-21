@@ -3,19 +3,22 @@
 # Apple Configuration Profile (.mobileconfig) Generator for 802.1X EAP-TLS
 # ==============================================================================
 # Generates a .mobileconfig file that bundles:
-#   1. RADIUS Server Root CA certificate (scoped trust anchor)
-#   2. Client PKCS#12 identity (certificate + private key)
-#   3. Wi-Fi payload for WPA3-Enterprise EAP-TLS authentication
+#   1. Client PKCS#12 identity (certificate + private key)
+#   2. Wi-Fi payload for WPA3-Enterprise EAP-TLS authentication with
+#      embedded RADIUS Server Root CA (TLSTrustedCertificates)
 #
-# The Root CA trust is scoped exclusively to 802.1X on the configured SSID
-# via PayloadCertificateAnchorUUID and TLSTrustedServerNames — the CA will
-# NOT be trusted system-wide for web browsing / HTTPS.
+# The Root CA is embedded directly as raw certificate data within
+# EAPClientConfiguration:TLSTrustedCertificates inside the Wi-Fi payload —
+# no com.apple.security.root payload is included. This ensures trust is
+# scoped exclusively to the specific SSID and is NEVER installed into the
+# macOS Keychain Trust Store or trusted system-wide for web browsing / HTTPS.
 #
 # Security Design:
 #   - WPA3-Enterprise only (hard-coded, non-configurable)
 #   - EAP-TLS only (hard-coded, non-configurable)
 #   - TLS 1.2 only (hard-coded, non-configurable)
-#   - Static trust pinning via PayloadCertificateAnchorUUID (hard-coded)
+#   - Static trust pinning via embedded TLSTrustedCertificates (SSID-scoped)
+#   - Dynamic trust overrides disallowed (TLSAllowTrustExceptions = false)
 #   - PKCS#12 password is NOT embedded — users must enter it at install time
 #     (the password must be transmitted/received out-of-band)
 #   - Profiles are generated unsigned (signing is planned for a future version)
@@ -53,7 +56,8 @@ Security properties (hard-coded, non-configurable):
   - Encryption     : WPA3-Enterprise only
   - Authentication : EAP-TLS only (type 13)
   - TLS Version    : TLS 1.2 only
-  - Trust          : Static server validation via PayloadCertificateAnchorUUID
+  - Trust          : Static server validation via embedded TLSTrustedCertificates (SSID-scoped)
+  - Trust Override : Disallowed (TLSAllowTrustExceptions = false)
   - P12 Password   : NOT embedded (entered by user at install time)
   - Profile Signing: Unsigned (signing planned for future version)
 
@@ -229,6 +233,7 @@ echo "  Security:"
 echo "    Encryption    : WPA3-Enterprise (hard-coded)"
 echo "    Auth Method   : EAP-TLS only (hard-coded)"
 echo "    TLS Version   : 1.2 only"
+echo "    Trust Scoping : SSID-pinned (TLSTrustedCertificates, no root CA payload)"
 echo "    P12 Password  : NOT embedded (user enters at install)"
 echo "    Signing       : Unsigned"
 echo "=============================================================================="
@@ -242,13 +247,17 @@ TMPDIR_WORK="$(mktemp -d)"
 chmod 700 "${TMPDIR_WORK}"
 trap 'rm -rf "${TMPDIR_WORK}"' EXIT INT TERM
 
-# Verify the Server CA file is a valid X.509 certificate (supports PEM and DER)
-if ! openssl x509 -in "${SERVER_CA_PATH}" -noout 2>/dev/null && \
-   ! openssl x509 -inform der -in "${SERVER_CA_PATH}" -noout 2>/dev/null; then
+# Ensure Server CA is converted to binary DER format for TLSTrustedCertificates
+SERVER_CA_DER="${TMPDIR_WORK}/server_ca.der"
+if openssl x509 -in "${SERVER_CA_PATH}" -outform der -out "${SERVER_CA_DER}" 2>/dev/null; then
+    :
+elif openssl x509 -inform der -in "${SERVER_CA_PATH}" -outform der -out "${SERVER_CA_DER}" 2>/dev/null; then
+    :
+else
     echo "❌ Error: Server CA file is not a valid X.509 certificate: ${SERVER_CA_PATH}" >&2
     exit 1
 fi
-echo "  ✔ Server CA certificate validated"
+echo "  ✔ Server CA certificate validated and converted to DER ($(wc -c < "${SERVER_CA_DER}" | tr -d ' ') bytes)"
 
 # Verify the P12 file is non-empty
 if [ ! -s "${CLIENT_P12_PATH}" ]; then
@@ -271,9 +280,8 @@ generate_uuid_from_hash() {
     echo "${hash:0:8}-${hash:8:4}-${hash:12:4}-${hash:16:4}-${hash:20:12}" | tr '[:lower:]' '[:upper:]'
 }
 
-# UUID for the Root CA payload (derived from certificate file content)
+# SHA-256 hash of the Server CA certificate (used in profile UUID for idempotence)
 SERVER_CA_HASH=$(shasum -a 256 "${SERVER_CA_PATH}" | cut -c1-64)
-UUID_ROOT_CA=$(generate_uuid_from_hash "root-ca:${SERVER_CA_HASH}")
 
 # UUID for the PKCS#12 identity payload (derived from the P12 file content)
 CLIENT_P12_HASH=$(shasum -a 256 "${CLIENT_P12_PATH}" | cut -c1-64)
@@ -288,7 +296,6 @@ UUID_PROFILE=$(generate_uuid_from_hash "profile:${WIFI_SSID}:${CLIENT_NAME}:${SE
 echo ""
 echo "  Generated UUIDs:"
 echo "    Profile       : ${UUID_PROFILE}"
-echo "    Root CA       : ${UUID_ROOT_CA}"
 echo "    Client ID     : ${UUID_CLIENT_IDENTITY}"
 echo "    Wi-Fi         : ${UUID_WIFI}"
 
@@ -312,88 +319,75 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadDescription string 'Configures WPA3-Enterprise EAP-TLS for ${WIFI_SSID}'" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadOrganization string 'Homelab'" "${PLIST_FILE}"
 
-# --- PayloadContent array (holds the 3 sub-payloads) ---
+# --- PayloadContent array (holds the 2 sub-payloads: Client Identity and Wi-Fi) ---
 "${PLISTBUDDY}" -c "Add :PayloadContent array" "${PLIST_FILE}"
 
 # --------------------------------------------------------------------------
-# Payload 0: Root CA Certificate (com.apple.security.root)
+# Payload 0: Client Identity PKCS#12 (com.apple.security.pkcs12)
 # --------------------------------------------------------------------------
 "${PLISTBUDDY}" -c "Add :PayloadContent:0 dict" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadType string com.apple.security.root" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadType string com.apple.security.pkcs12" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadVersion integer 1" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadIdentifier string '${PROFILE_IDENTIFIER}.root-ca'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadUUID string '${UUID_ROOT_CA}'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDisplayName string 'RADIUS Server Root CA'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDescription string 'Root CA for 802.1X RADIUS server authentication'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadCertificateFileName string '$(basename "${SERVER_CA_PATH}")'" "${PLIST_FILE}"
-
-# Import the certificate as binary data — PlistBuddy's Import command
-# reads the raw file bytes and stores them as a <data> field in the plist.
-"${PLISTBUDDY}" -c "Import :PayloadContent:0:PayloadContent '${SERVER_CA_PATH}'" "${PLIST_FILE}"
-
-# --------------------------------------------------------------------------
-# Payload 1: Client Identity PKCS#12 (com.apple.security.pkcs12)
-# --------------------------------------------------------------------------
-"${PLISTBUDDY}" -c "Add :PayloadContent:1 dict" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadType string com.apple.security.pkcs12" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadVersion integer 1" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadIdentifier string '${PROFILE_IDENTIFIER}.client-identity'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadUUID string '${UUID_CLIENT_IDENTITY}'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadDisplayName string '${CLIENT_NAME} Client Identity'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadDescription string 'Client certificate and private key for EAP-TLS authentication'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadCertificateFileName string '$(basename "${CLIENT_P12_PATH}")'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadIdentifier string '${PROFILE_IDENTIFIER}.client-identity'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadUUID string '${UUID_CLIENT_IDENTITY}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDisplayName string '${CLIENT_NAME} Client Identity'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadDescription string 'Client certificate and private key for EAP-TLS authentication'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:0:PayloadCertificateFileName string '$(basename "${CLIENT_P12_PATH}")'" "${PLIST_FILE}"
 
 # Import the PKCS#12 file as binary data.
 # NOTE: The Password key is intentionally omitted. The user will be prompted
 # to enter the P12 password when installing the profile on their device.
 # This is a deliberate security design decision — the password must be
 # transmitted/received out-of-band.
-"${PLISTBUDDY}" -c "Import :PayloadContent:1:PayloadContent '${CLIENT_P12_PATH}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Import :PayloadContent:0:PayloadContent '${CLIENT_P12_PATH}'" "${PLIST_FILE}"
 
 # --------------------------------------------------------------------------
-# Payload 2: Wi-Fi Configuration (com.apple.wifi.managed)
+# Payload 1: Wi-Fi Configuration (com.apple.wifi.managed)
 # --------------------------------------------------------------------------
-"${PLISTBUDDY}" -c "Add :PayloadContent:2 dict" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadType string com.apple.wifi.managed" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadVersion integer 1" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadIdentifier string '${PROFILE_IDENTIFIER}.wifi'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadUUID string '${UUID_WIFI}'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadDisplayName string 'Wi-Fi (${WIFI_SSID})'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1 dict" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadType string com.apple.wifi.managed" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadVersion integer 1" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadIdentifier string '${PROFILE_IDENTIFIER}.wifi'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadUUID string '${UUID_WIFI}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadDisplayName string 'Wi-Fi (${WIFI_SSID})'" "${PLIST_FILE}"
 
 # Network settings
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:SSID_STR string '${WIFI_SSID}'" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:HIDDEN_NETWORK bool false" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:AutoJoin bool true" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:ProxyType string None" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:CaptiveBypass bool true" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:DisableAssociationMACRandomization bool false" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:IsHotspot bool false" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:SSID_STR string '${WIFI_SSID}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:HIDDEN_NETWORK bool false" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:AutoJoin bool true" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:ProxyType string None" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:CaptiveBypass bool true" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:DisableAssociationMACRandomization bool false" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:IsHotspot bool false" "${PLIST_FILE}"
 
 # WPA3-Enterprise (hard-coded — non-configurable)
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EncryptionType string WPA3" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EncryptionType string WPA3" "${PLIST_FILE}"
 
 # Client identity reference: points to the PKCS#12 payload UUID
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:PayloadCertificateUUID string '${UUID_CLIENT_IDENTITY}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:PayloadCertificateUUID string '${UUID_CLIENT_IDENTITY}'" "${PLIST_FILE}"
 
 # EAP Client Configuration (enterprise authentication settings)
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration dict" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration dict" "${PLIST_FILE}"
 
 # EAP-TLS only (type 13) — hard-coded, non-configurable
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:AcceptEAPTypes array" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:AcceptEAPTypes:0 integer 13" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:AcceptEAPTypes array" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:AcceptEAPTypes:0 integer 13" "${PLIST_FILE}"
 
 # TLS 1.2 only (minimum and maximum pinned to 1.2) — hard-coded, CNSA requirement
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSMinimumVersion string 1.2" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSMaximumVersion string 1.2" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMinimumVersion string 1.2" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMaximumVersion string 1.2" "${PLIST_FILE}"
 
-# Server trust anchors: reference the Root CA payload UUID
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:PayloadCertificateAnchorUUID array" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:PayloadCertificateAnchorUUID:0 string '${UUID_ROOT_CA}'" "${PLIST_FILE}"
+# Disallow dynamic user trust overrides
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSAllowTrustExceptions bool false" "${PLIST_FILE}"
 
 # Trusted server names: only accept certificates with this CN
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSTrustedServerNames array" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:2:EAPClientConfiguration:TLSTrustedServerNames:0 string '${RADIUS_SERVER_NAME}'" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSTrustedServerNames array" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSTrustedServerNames:0 string '${RADIUS_SERVER_NAME}'" "${PLIST_FILE}"
 
+# Server trust anchor: embedded directly into EAPClientConfiguration as raw DER certificate data.
+# This scopes trust EXCLUSIVELY to this SSID — no com.apple.security.root payload is installed.
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSTrustedCertificates array" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Import :PayloadContent:1:EAPClientConfiguration:TLSTrustedCertificates:0 '${SERVER_CA_DER}'" "${PLIST_FILE}"
 
 # ==============================================================================
 # 5. Finalize: Convert to XML and validate
@@ -411,26 +405,33 @@ if ! plutil -lint "${PLIST_FILE}" >/dev/null 2>&1; then
 fi
 echo "  ✔ Plist validation passed"
 
-# Verify UUID cross-references
-echo "  → Verifying UUID cross-references..."
-ANCHOR_UUID_IN_WIFI=$("${PLISTBUDDY}" -c "Print :PayloadContent:2:EAPClientConfiguration:PayloadCertificateAnchorUUID:0" "${PLIST_FILE}")
-ROOT_CA_UUID=$("${PLISTBUDDY}" -c "Print :PayloadContent:0:PayloadUUID" "${PLIST_FILE}")
-if [ "${ANCHOR_UUID_IN_WIFI}" != "${ROOT_CA_UUID}" ]; then
-    echo "❌ Error: PayloadCertificateAnchorUUID mismatch!" >&2
-    echo "   Wi-Fi anchor: ${ANCHOR_UUID_IN_WIFI}" >&2
-    echo "   Root CA UUID: ${ROOT_CA_UUID}" >&2
-    exit 1
-fi
-
-CERT_UUID_IN_WIFI=$("${PLISTBUDDY}" -c "Print :PayloadContent:2:PayloadCertificateUUID" "${PLIST_FILE}")
-IDENTITY_UUID=$("${PLISTBUDDY}" -c "Print :PayloadContent:1:PayloadUUID" "${PLIST_FILE}")
+# Verify profile references and embedded certificate
+echo "  → Verifying profile references..."
+CERT_UUID_IN_WIFI=$("${PLISTBUDDY}" -c "Print :PayloadContent:1:PayloadCertificateUUID" "${PLIST_FILE}")
+IDENTITY_UUID=$("${PLISTBUDDY}" -c "Print :PayloadContent:0:PayloadUUID" "${PLIST_FILE}")
 if [ "${CERT_UUID_IN_WIFI}" != "${IDENTITY_UUID}" ]; then
     echo "❌ Error: PayloadCertificateUUID mismatch!" >&2
     echo "   Wi-Fi cert:   ${CERT_UUID_IN_WIFI}" >&2
     echo "   Identity UUID: ${IDENTITY_UUID}" >&2
     exit 1
 fi
-echo "  ✔ UUID cross-references verified"
+echo "  ✔ Client identity reference verified"
+
+SERVER_NAME_IN_WIFI=$("${PLISTBUDDY}" -c "Print :PayloadContent:1:EAPClientConfiguration:TLSTrustedServerNames:0" "${PLIST_FILE}")
+if [ "${SERVER_NAME_IN_WIFI}" != "${RADIUS_SERVER_NAME}" ]; then
+    echo "❌ Error: TLSTrustedServerNames mismatch!" >&2
+    echo "   Wi-Fi server: ${SERVER_NAME_IN_WIFI}" >&2
+    echo "   Expected:     ${RADIUS_SERVER_NAME}" >&2
+    exit 1
+fi
+echo "  ✔ Trusted server name verified (${SERVER_NAME_IN_WIFI})"
+
+# Verify TLSTrustedCertificates is present and non-empty
+if ! "${PLISTBUDDY}" -c "Print :PayloadContent:1:EAPClientConfiguration:TLSTrustedCertificates:0" "${PLIST_FILE}" >/dev/null 2>&1; then
+    echo "❌ Error: TLSTrustedCertificates is missing from EAPClientConfiguration!" >&2
+    exit 1
+fi
+echo "  ✔ Embedded TLSTrustedCertificates anchor verified"
 
 # Copy to final output location
 mkdir -p "$(dirname "${OUTPUT_PATH}")"
