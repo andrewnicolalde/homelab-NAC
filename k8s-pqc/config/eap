@@ -34,19 +34,27 @@ eap {
 
         # NOTE: ca_path is intentionally omitted to avoid directory permission checks
 
-        # cipher_list only governs TLS <= 1.2 and is therefore inert here.
-        # FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite option; TLS 1.3 suites are
-        # pinned to TLS_AES_256_GCM_SHA384 via OPENSSL_CONF (see openssl.cnf).
-        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384"
+        # Hybrid post-quantum key exchange groups ONLY (no classical fallback),
+        # strongest first:
+        #   - SecP384r1MLKEM1024 : P-384 + ML-KEM-1024 (NIST Category 5)
+        #   - X25519MLKEM768     : X25519 + ML-KEM-768 (Category 3; the only PQ
+        #                          group Apple clients currently offer)
+        # Clients offering only classical groups fail with "no suitable key share".
+        ecdh_curve = "SecP384r1MLKEM1024:X25519MLKEM768"
+
+        # Use the server's order above when choosing a group, not the client's.
+        # In OpenSSL 3.5 this governs the TLS 1.3 group choice, not only the
+        # cipher: a client sending key shares for both groups gets
+        # SecP384r1MLKEM1024 even if it prefers X25519MLKEM768. A client that
+        # sends only an X25519MLKEM768 key share (as Apple does) still gets
+        # X25519MLKEM768, because OpenSSL avoids a HelloRetryRequest when an
+        # acceptable key share is already present.
         cipher_server_preference = yes
 
-        # Hybrid post-quantum key exchange groups ONLY (no classical fallback):
-        #   - X25519MLKEM768     : X25519 + ML-KEM-768 (offered by Apple OS 26 clients)
-        #   - SecP384r1MLKEM1024 : P-384 + ML-KEM-1024
-        # Clients offering only classical groups fail with "no suitable key share".
-        ecdh_curve = "X25519MLKEM768:SecP384r1MLKEM1024"
-
-        # TLS 1.3 only (RFC 9190 EAP-TLS 1.3)
+        # TLS 1.3 only (RFC 9190 EAP-TLS 1.3). There is no cipher_list, which only
+        # governs TLS <= 1.2. FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite
+        # option, so the suite is pinned to TLS_AES_256_GCM_SHA384 via
+        # OPENSSL_CONF (see openssl.cnf).
         tls_min_version = "1.3"
         tls_max_version = "1.3"
 
