@@ -328,7 +328,8 @@ To keep this public repository clean of private IP subnets, live RADIUS secrets,
 ┌───────────────────────────┴────────────────────────────┐
 │ PRIVATE OVERLAY (homelab-network-private)              │
 │ - kustomization.yaml (overlays remote base)            │
-│ - Live clients.conf, authorize, and eap configs        │
+│ - Live clients.conf and authorize                      │
+│ - Gitignored RADIUS shared secrets (.radius_secret)    │
 │ - Live certificates and Kubernetes secrets             │
 └────────────────────────────────────────────────────────┘
 ```

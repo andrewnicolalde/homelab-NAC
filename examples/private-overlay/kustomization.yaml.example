@@ -23,8 +23,15 @@ configMapGenerator:
       - clients.conf=./clients.conf
       - authorize=./authorize
 
-# Overrides the base Secret with your actual PKI certificates and private keys
+# Overrides the base Secrets with your RADIUS shared secrets and your actual
+# PKI certificates and private keys
 secretGenerator:
+  # RADIUS client shared secrets from a gitignored KEY=value file; clients.conf
+  # references them as $ENV{RADIUS_SECRET_AUTHENTICATORS} / $ENV{RADIUS_SECRET_TEST}
+  - name: freeradius-client-secrets
+    behavior: replace
+    envs:
+      - .radius_secret
   - name: freeradius-certs
     behavior: replace
     files:

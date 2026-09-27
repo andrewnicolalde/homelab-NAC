@@ -11,7 +11,8 @@ In your separate private repository (e.g. `homelab-network-private`), set up a d
 ```text
 homelab-network-private/
 ├── kustomization.yaml       # Defines resources and generators
-├── clients.conf             # Real AP & Switch IP ranges and RADIUS secrets
+├── clients.conf             # Real AP & switch IP ranges; secrets referenced as $ENV{...}
+├── .radius_secret           # RADIUS shared secrets, KEY=value (gitignore this file!)
 ├── authorize                # Real device names mapped to production VLANs
 └── certs/
     ├── radius-server/
@@ -51,14 +52,42 @@ configMapGenerator:
       - clients.conf=./clients.conf
       - authorize=./authorize
 
-# Replace the base Secret with your actual PKI certificates and private keys:
+# Replace the base Secrets with your RADIUS shared secrets and your actual
+# PKI certificates and private keys:
 secretGenerator:
+  # RADIUS client shared secrets from a gitignored KEY=value file; clients.conf
+  # references them as $ENV{RADIUS_SECRET_AUTHENTICATORS} / $ENV{RADIUS_SECRET_TEST}
+  - name: freeradius-client-secrets
+    behavior: replace
+    envs:
+      - .radius_secret
   - name: freeradius-certs
     behavior: replace
     files:
       - server.pem=./certs/radius-server/server.pem
       - ca.pem=./certs/user-client-devices/user_root_ca.crt
 ```
+
+### RADIUS shared secrets
+
+Shared secrets are kept out of version control entirely. `clients.conf` references them as environment variables, and the Deployments load those from the `freeradius-client-secrets` Secret:
+
+```text
+# clients.conf
+client network_authenticators {
+    ipaddr = 10.1.0.0/24
+    secret = $ENV{RADIUS_SECRET_AUTHENTICATORS}
+    ...
+}
+```
+
+```text
+# .radius_secret  (add it to .gitignore; KEY=value, one per line)
+RADIUS_SECRET_AUTHENTICATORS=<random value, also entered in your AP RADIUS profile>
+RADIUS_SECRET_TEST=<random value, used by test/run-test.sh>
+```
+
+Generate each value with `openssl rand -base64 64 | tr -dc 'A-Za-z0-9' | head -c 48` (48 random alphanumeric characters, about 286 bits; removing the two base64 symbols keeps the remaining characters uniformly distributed), and use a different secret per client. Check your authenticator's limits: UniFi is known to accept 48 alphanumeric characters. FreeRADIUS refuses to start if a referenced variable is unset or empty. The `envs:` file format never includes the line ending in a value, so an editor-added trailing newline cannot silently change a secret.
 
 ---
 

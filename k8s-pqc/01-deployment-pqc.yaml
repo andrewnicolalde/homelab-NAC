@@ -29,6 +29,10 @@ spec:
           image: ghcr.io/andrewnicolalde/homelab-nac/freeradius@sha256:b74e8d0cf81d4e37b4601e2c45225c9f78f350d8ad7ff27c81f0964d3f09757c
           imagePullPolicy: IfNotPresent
           args: ["-X"]
+          envFrom:
+            # RADIUS client shared secrets, referenced from clients.conf as $ENV{...}
+            - secretRef:
+                name: freeradius-client-secrets
           env:
             # Pins TLS 1.3 ciphersuites and PQ groups process-wide (see config/openssl.cnf)
             - name: OPENSSL_CONF

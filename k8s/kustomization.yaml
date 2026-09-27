@@ -9,6 +9,12 @@ resources:
   - 02-service.yaml
 
 secretGenerator:
+  # RADIUS client shared secrets, loaded as environment variables and
+  # referenced from clients.conf as $ENV{...}. Replace in your overlay.
+  - name: freeradius-client-secrets
+    literals:
+      - RADIUS_SECRET_AUTHENTICATORS=PLACEHOLDER_REPLACE_IN_OVERLAY
+      - RADIUS_SECRET_TEST=PLACEHOLDER_REPLACE_IN_OVERLAY
   - name: freeradius-certs
     literals:
       - ca.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
