@@ -1,0 +1,80 @@
+# ==============================================================================
+# FreeRADIUS EAP Module Configuration (mods-available/eap) — Post-Quantum Variant
+# EAP-TLS over TLS 1.3 with hybrid ML-KEM key establishment ONLY
+# ==============================================================================
+# Experimental deployment. Supplicants that cannot negotiate TLS 1.3 with a
+# hybrid post-quantum key exchange group are rejected during the handshake;
+# there is deliberately NO classical (EC)DHE fallback.
+#
+# Requires OpenSSL >= 3.5 (native ML-KEM). Authentication remains classical
+# (ECDSA P-384 certificates) — only the ephemeral key exchange is PQ-secure.
+# ==============================================================================
+eap {
+    # Default to TLS for certificate-based 802.1X
+    default_eap_type = tls
+
+    # EAP session expiration timeout
+    timer_expire = 60
+
+    # Reject unsupported/unknown EAP types
+    ignore_unknown_eap_types = no
+
+    max_sessions = ${max_requests}
+
+    # --------------------------------------------------------------------------
+    # Common TLS Configuration
+    # --------------------------------------------------------------------------
+    tls-config tls-common {
+        # Server certificate and private key from Kubernetes Secret
+        private_key_file = /etc/raddb/certs/server.pem
+        certificate_file = /etc/raddb/certs/server.pem
+
+        # Trusted Root CA for validating client identity certificates
+        ca_file = /etc/raddb/certs/ca.pem
+
+        # NOTE: ca_path is intentionally omitted to avoid directory permission checks
+
+        # Hybrid post-quantum key exchange groups ONLY (no classical fallback),
+        # strongest first:
+        #   - SecP384r1MLKEM1024 : P-384 + ML-KEM-1024 (NIST Category 5)
+        #   - X25519MLKEM768     : X25519 + ML-KEM-768 (Category 3; the only PQ
+        #                          group Apple clients currently offer)
+        # Clients offering only classical groups fail with "no suitable key share".
+        ecdh_curve = "SecP384r1MLKEM1024:X25519MLKEM768"
+
+        # Use the server's order above when choosing a group, not the client's.
+        # In OpenSSL 3.5 this governs the TLS 1.3 group choice, not only the
+        # cipher: a client sending key shares for both groups gets
+        # SecP384r1MLKEM1024 even if it prefers X25519MLKEM768. A client that
+        # sends only an X25519MLKEM768 key share (as Apple does) still gets
+        # X25519MLKEM768, because OpenSSL avoids a HelloRetryRequest when an
+        # acceptable key share is already present.
+        cipher_server_preference = yes
+
+        # TLS 1.3 only (RFC 9190 EAP-TLS 1.3). There is no cipher_list, which only
+        # governs TLS <= 1.2. FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite
+        # option, so the suite is pinned to TLS_AES_256_GCM_SHA384 via
+        # OPENSSL_CONF (see openssl.cnf).
+        tls_min_version = "1.3"
+        tls_max_version = "1.3"
+
+        # Explicitly disable session resumption caching to enforce full mutual re-authentication.
+        # VLAN assignment (sites/check-eap-tls) has only been verified for full
+        # handshakes; retest it before enabling resumption.
+        cache {
+            enable = no
+        }
+    }
+
+    # --------------------------------------------------------------------------
+    # EAP-TLS Submodule
+    # --------------------------------------------------------------------------
+    tls {
+        tls = tls-common
+
+        # Admission and VLAN assignment from the verified client certificate
+        # CN, failing closed (supplicants use an anonymous outer identity);
+        # see sites/check-eap-tls
+        virtual_server = check-eap-tls
+    }
+}

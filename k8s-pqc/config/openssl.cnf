@@ -1,0 +1,21 @@
+# ==============================================================================
+# OpenSSL Configuration for the Post-Quantum FreeRADIUS Deployment
+# ==============================================================================
+# Loaded via OPENSSL_CONF. Applies process-wide defaults to every SSL_CTX that
+# radiusd creates, covering settings FreeRADIUS 3.0.x cannot express itself
+# (TLS 1.3 ciphersuites) and backstopping those it can (protocol range, groups).
+# Without this file, TLS 1.3 clients may negotiate AES-128-GCM or ChaCha20.
+# ==============================================================================
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_module
+
+[ssl_module]
+system_default = tls_system_default
+
+[tls_system_default]
+MinProtocol = TLSv1.3
+MaxProtocol = TLSv1.3
+Ciphersuites = TLS_AES_256_GCM_SHA384
+Groups = SecP384r1MLKEM1024:X25519MLKEM768

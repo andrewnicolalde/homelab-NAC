@@ -1,7 +1,10 @@
 # ==============================================================================
 # Dockerfile for eapol_test (wpa_supplicant) with CNSA Suite B 192-bit support
+# Post-quantum (hybrid ML-KEM) EAP-TLS 1.3 testing needs OpenSSL >= 3.5 at
+# runtime: build with --build-arg ALPINE_VERSION=3.24.1 (see eapol_test-pqc.conf)
 # ==============================================================================
-FROM alpine:3.20 AS builder
+ARG ALPINE_VERSION=3.20
+FROM alpine:${ALPINE_VERSION} AS builder
 
 RUN apk add --no-cache \
     build-base \
@@ -26,7 +29,7 @@ RUN tar -xzf wpa_supplicant-${WPA_SUPPLICANT_VERSION}.tar.gz && \
     make -j$(nproc) eapol_test && \
     install -m 755 eapol_test /usr/local/bin/eapol_test
 
-FROM alpine:3.20
+FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache openssl libnl3 dbus-libs
 COPY --from=builder /usr/local/bin/eapol_test /usr/local/bin/eapol_test
 

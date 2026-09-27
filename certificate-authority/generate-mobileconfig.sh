@@ -16,7 +16,10 @@
 # Security Design:
 #   - WPA3-Enterprise only (hard-coded, non-configurable)
 #   - EAP-TLS only (hard-coded, non-configurable)
-#   - TLS 1.2 only (hard-coded, non-configurable)
+#   - Single pinned TLS version: 1.2 (default, CNSA) or 1.3 (post-quantum
+#     deployment in k8s-pqc/, selected with --tls-version 1.3)
+#   - TLS 1.3 profiles send OuterIdentity "anonymous" instead of the device
+#     name (Apple requires an outer identity when TLSMinimumVersion is 1.3)
 #   - Static trust pinning via embedded TLSTrustedCertificates (SSID-scoped)
 #   - Dynamic trust overrides disallowed (TLSAllowTrustExceptions = false)
 #   - PKCS#12 password is NOT embedded — users must enter it at install time
@@ -55,7 +58,8 @@ Generates a .mobileconfig profile for WPA3-Enterprise EAP-TLS authentication.
 Security properties (hard-coded, non-configurable):
   - Encryption     : WPA3-Enterprise only
   - Authentication : EAP-TLS only (type 13)
-  - TLS Version    : TLS 1.2 only
+  - TLS Version    : Pinned to a single version (default: TLS 1.2)
+  - Outer Identity : "anonymous" for TLS 1.3 profiles (none for TLS 1.2)
   - Trust          : Static server validation via embedded TLSTrustedCertificates (SSID-scoped)
   - Trust Override : Disallowed (TLSAllowTrustExceptions = false)
   - P12 Password   : NOT embedded (entered by user at install time)
@@ -74,6 +78,8 @@ Optional:
   --radius-server-name <cn>  RADIUS server CN (env: RADIUS_SERVER_NAME)
   --output <path>            Output .mobileconfig path (default: <client-name>.mobileconfig)
   --identifier <id>          Reverse-DNS profile identifier (default: com.homelab.wifi.eap-tls)
+  --tls-version <1.2|1.3>    Pinned TLS version (default: 1.2). Use 1.3 for the
+                             post-quantum (hybrid ML-KEM) RADIUS deployment
   --force, -f                Overwrite existing output file
   --help, -h                 Display this help message
 
@@ -105,7 +111,13 @@ WIFI_SSID="${WIFI_SSID:-ENTERPRISE-WIFI}"
 RADIUS_SERVER_NAME="${RADIUS_SERVER_NAME:-radius.internal.example.com}"
 OUTPUT_PATH=""
 PROFILE_IDENTIFIER="${PROFILE_IDENTIFIER:-com.homelab.wifi.eap-tls}"
+TLS_VERSION="1.2"
 FORCE="false"
+# Values given on the command line; re-applied after sourcing certs.env so
+# explicit flags take precedence over the config file
+CLI_WIFI_SSID=""
+CLI_RADIUS_SERVER_NAME=""
+CLI_PROFILE_IDENTIFIER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -122,11 +134,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --ssid)
-            WIFI_SSID="$2"
+            CLI_WIFI_SSID="$2"
             shift 2
             ;;
         --radius-server-name)
-            RADIUS_SERVER_NAME="$2"
+            CLI_RADIUS_SERVER_NAME="$2"
             shift 2
             ;;
         --output)
@@ -134,7 +146,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --identifier)
-            PROFILE_IDENTIFIER="$2"
+            CLI_PROFILE_IDENTIFIER="$2"
+            shift 2
+            ;;
+        --tls-version)
+            TLS_VERSION="$2"
             shift 2
             ;;
         --force|-f)
@@ -172,6 +188,11 @@ elif [ -f "${SCRIPT_DIR}/certs.env" ]; then
     RADIUS_SERVER_NAME="${RADIUS_SERVER_NAME:-radius.internal.example.com}"
 fi
 
+# Command-line flags override both environment variables and certs.env
+WIFI_SSID="${CLI_WIFI_SSID:-${WIFI_SSID}}"
+RADIUS_SERVER_NAME="${CLI_RADIUS_SERVER_NAME:-${RADIUS_SERVER_NAME}}"
+PROFILE_IDENTIFIER="${CLI_PROFILE_IDENTIFIER:-${PROFILE_IDENTIFIER:-com.homelab.wifi.eap-tls}}"
+
 # Validate required arguments
 MISSING_ARGS=()
 [ -z "${SERVER_CA_PATH}" ] && MISSING_ARGS+=("--server-ca")
@@ -184,6 +205,14 @@ if [ ${#MISSING_ARGS[@]} -gt 0 ]; then
     show_usage >&2
     exit 1
 fi
+
+case "${TLS_VERSION}" in
+    1.2|1.3) ;;
+    *)
+        echo "❌ Error: --tls-version must be 1.2 or 1.3 (got: ${TLS_VERSION})" >&2
+        exit 1
+        ;;
+esac
 
 # Validate input files exist
 if [ ! -f "${SERVER_CA_PATH}" ]; then
@@ -232,7 +261,10 @@ echo ""
 echo "  Security:"
 echo "    Encryption    : WPA3-Enterprise (hard-coded)"
 echo "    Auth Method   : EAP-TLS only (hard-coded)"
-echo "    TLS Version   : 1.2 only"
+echo "    TLS Version   : ${TLS_VERSION} only"
+if [ "${TLS_VERSION}" = "1.3" ]; then
+    echo "    Outer Identity: anonymous"
+fi
 echo "    Trust Scoping : SSID-pinned (TLSTrustedCertificates, no root CA payload)"
 echo "    P12 Password  : NOT embedded (user enters at install)"
 echo "    Signing       : Unsigned"
@@ -373,9 +405,18 @@ PLIST_FILE="${TMPDIR_WORK}/profile.plist"
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:AcceptEAPTypes array" "${PLIST_FILE}"
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:AcceptEAPTypes:0 integer 13" "${PLIST_FILE}"
 
-# TLS 1.2 only (minimum and maximum pinned to 1.2) — hard-coded, CNSA requirement
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMinimumVersion string 1.2" "${PLIST_FILE}"
-"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMaximumVersion string 1.2" "${PLIST_FILE}"
+# Single TLS version (minimum and maximum pinned to the same value).
+# 1.2 is the CNSA default; 1.3 is required for hybrid ML-KEM key exchange.
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMinimumVersion string ${TLS_VERSION}" "${PLIST_FILE}"
+"${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSMaximumVersion string ${TLS_VERSION}" "${PLIST_FILE}"
+
+# EAP identity privacy: Apple requires an OuterIdentity when TLSMinimumVersion
+# is 1.3 and otherwise refuses to start 802.1X. The device name then travels
+# only inside the encrypted handshake (client certificate); the RADIUS server
+# must authorize on the certificate CN rather than User-Name.
+if [ "${TLS_VERSION}" = "1.3" ]; then
+    "${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:OuterIdentity string anonymous" "${PLIST_FILE}"
+fi
 
 # Disallow dynamic user trust overrides
 "${PLISTBUDDY}" -c "Add :PayloadContent:1:EAPClientConfiguration:TLSAllowTrustExceptions bool false" "${PLIST_FILE}"

@@ -13,7 +13,6 @@ homelab-network-private/
 ├── kustomization.yaml       # Defines resources and generators
 ├── clients.conf             # Real AP & Switch IP ranges and RADIUS secrets
 ├── authorize                # Real device names mapped to production VLANs
-├── eap                      # Custom EAP parameters (if overriding)
 └── certs/
     ├── radius-server/
     │   ├── server_root_ca.crt
@@ -42,13 +41,14 @@ resources:
   # Pull the base Kubernetes manifests directly from the public GitHub repository:
   - github.com/andrewnicolalde/homelab-NAC//k8s?ref=main
 
-# Replace the base ConfigMap with your actual private network definitions:
+# Override the site-specific keys of the base ConfigMap. Use merge, not
+# replace: the base also ships eap and the shared check-eap-tls/cert_vlan
+# admission policy, and radiusd will not start without them.
 configMapGenerator:
   - name: freeradius-config
-    behavior: replace
+    behavior: merge
     files:
       - clients.conf=./clients.conf
-      - eap=./eap
       - authorize=./authorize
 
 # Replace the base Secret with your actual PKI certificates and private keys:

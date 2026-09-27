@@ -1,0 +1,58 @@
+# ==============================================================================
+# FreeRADIUS Virtual Server (sites-enabled/check-eap-tls)
+# Admission and VLAN assignment from the verified client certificate
+# ==============================================================================
+# Shared by the classical (k8s/) and post-quantum (k8s-pqc/) deployments.
+# Called by the EAP-TLS module (virtual_server = check-eap-tls in
+# mods-enabled/eap) once per authentication, after the client certificate
+# chain has been verified. TLS-Client-Cert-* attributes are available here;
+# the stock default site is otherwise left unchanged.
+#
+# Policy (fail closed): a device is admitted only if its certificate CN has an
+# entry in the authorize file, and that entry alone selects its VLAN. A valid
+# certificate without an entry is rejected, so removing an entry revokes
+# network access even though no CRL is checked.
+#
+# The claimed identity (User-Name) is never trusted: post-quantum supplicants
+# send an anonymous outer identity (Apple requires one for EAP-TLS 1.3), and
+# the stock default site still runs 'files' in authorize keyed on User-Name.
+# Any VLAN attributes that lookup added for a claimed name are discarded here
+# before the certificate-based lookup.
+# ==============================================================================
+server check-eap-tls {
+    authorize {
+        # Discard VLAN attributes derived from the claimed User-Name.
+        # EAP-TLS appends this server's reply to the outer reply rather than
+        # replacing it, so anything the default site's lookup added must be
+        # removed here. This list must cover every reply attribute used in
+        # the authorize file: adding another (e.g. Session-Timeout, Filter-Id)
+        # or a DEFAULT entry there requires extending it, otherwise the
+        # claimed name can still influence the Access-Accept.
+        update outer.reply {
+            &Tunnel-Type !* ANY
+            &Tunnel-Medium-Type !* ANY
+            &Tunnel-Private-Group-Id !* ANY
+        }
+
+        # Admission and VLAN assignment: look up the certificate CN in the
+        # authorize file
+        cert_vlan
+
+        # Accept ONLY when the certificate CN matched an entry. Any other
+        # outcome (no entry, module failure) leaves Auth-Type unset, which
+        # EAP-TLS treats as "Certificate rejected by the virtual server".
+        if (ok) {
+            update config {
+                &Auth-Type := Accept
+            }
+
+            # Hand the authenticator the certificate identity rather than the
+            # (possibly anonymous) outer identity, so controllers and
+            # accounting show the real device name (sent over the wired
+            # RADIUS link, not over the air)
+            update outer.reply {
+                &User-Name := &TLS-Client-Cert-Common-Name
+            }
+        }
+    }
+}

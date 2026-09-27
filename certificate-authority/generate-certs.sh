@@ -66,6 +66,13 @@ Options:
   --yubikey               Use YubiKey hardware root of trust (3-CA architecture)
   --mobileconfig          Generate Apple Configuration Profile (.mobileconfig) alongside
                           client P12 (only valid with --client mode)
+  --tls-version <1.2|1.3> TLS version pinned in the .mobileconfig (default: 1.2).
+                          Use 1.3 for the post-quantum RADIUS deployment. A 1.3
+                          profile is written as <identity>-tls1.3.mobileconfig so
+                          it sits alongside the default profile, with the profile
+                          identifier suffixed .tls1.3 (requires --mobileconfig)
+  --ssid <ssid>           Wi-Fi SSID for the .mobileconfig, overriding WIFI_SSID in
+                          certs.env (requires --mobileconfig)
   --force, -f             Overwrite existing certificates/keys if already present
   --help, -h              Display this help message
 
@@ -81,6 +88,10 @@ Examples:
 
   # Onboard a new client device with .mobileconfig profile
   ./$(basename "$0") --client client-device-01 --mobileconfig
+
+  # Add a TLS 1.3 (post-quantum deployment) profile for an existing client
+  ./$(basename "$0") --client client-device-01 --mobileconfig --tls-version 1.3 \
+      --ssid HOMELAB-WIFI-PQC
 ==============================================================================
 EOF
 }
@@ -95,6 +106,8 @@ CONFIG_FILE="${CONFIG_FILE:-${CERTS_ENV:-}}"
 OUTPUT_DIR="${OUTPUT_DIR:-}"
 USE_YUBIKEY="${USE_YUBIKEY:-false}"
 GENERATE_MOBILECONFIG="false"
+MOBILECONFIG_TLS_VERSION=""
+MOBILECONFIG_SSID=""
 
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -137,6 +150,14 @@ while [[ $# -gt 0 ]]; do
             GENERATE_MOBILECONFIG="true"
             shift
             ;;
+        --tls-version)
+            MOBILECONFIG_TLS_VERSION="${2:-}"
+            shift 2
+            ;;
+        --ssid)
+            MOBILECONFIG_SSID="${2:-}"
+            shift 2
+            ;;
         --help|-h)
             show_usage
             exit 0
@@ -159,6 +180,22 @@ if [ -z "${RUN_MODE}" ]; then
     show_usage >&2
     exit 1
 fi
+
+# Validate .mobileconfig TLS version before any certificates are issued
+if { [ -n "${MOBILECONFIG_TLS_VERSION}" ] || [ -n "${MOBILECONFIG_SSID}" ]; } \
+    && [ "${GENERATE_MOBILECONFIG}" != "true" ]; then
+    echo "❌ Error: --tls-version and --ssid only apply to the .mobileconfig profile; add --mobileconfig." >&2
+    exit 1
+fi
+MOBILECONFIG_TLS_VERSION="${MOBILECONFIG_TLS_VERSION:-1.2}"
+case "${MOBILECONFIG_TLS_VERSION}" in
+    1.2) MOBILECONFIG_SUFFIX="" ;;
+    1.3) MOBILECONFIG_SUFFIX="-tls1.3" ;;
+    *)
+        echo "❌ Error: --tls-version must be 1.2 or 1.3 (got: ${MOBILECONFIG_TLS_VERSION})" >&2
+        exit 1
+        ;;
+esac
 
 # Source optional configuration file if specified or present locally
 if [ -n "${CONFIG_FILE}" ] && [ -f "${CONFIG_FILE}" ]; then
@@ -333,11 +370,22 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
             if [ "${FORCE}" = "true" ]; then
                 MOBILECONFIG_FORCE_ARG=(--force)
             fi
+            MOBILECONFIG_EXTRA_ARGS=()
+            if [ -n "${MOBILECONFIG_SSID}" ]; then
+                MOBILECONFIG_EXTRA_ARGS+=(--ssid "${MOBILECONFIG_SSID}")
+            fi
+            if [ "${MOBILECONFIG_TLS_VERSION}" = "1.3" ]; then
+                # Distinct identifier so the profile installs alongside the TLS 1.2 one
+                MOBILECONFIG_EXTRA_ARGS+=(--identifier "${PROFILE_IDENTIFIER:-com.homelab.wifi.eap-tls}.tls1.3")
+            fi
             echo ""
             "${MOBILECONFIG_SCRIPT}" \
                 --server-ca "${SERVER_DIR}/server_root_ca.crt" \
                 --client-p12 "${CLIENT_P12}" \
                 --client-name "${TARGET_CLIENT}" \
+                --tls-version "${MOBILECONFIG_TLS_VERSION}" \
+                --output "${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}${MOBILECONFIG_SUFFIX}.mobileconfig" \
+                "${MOBILECONFIG_EXTRA_ARGS[@]:+${MOBILECONFIG_EXTRA_ARGS[@]}}" \
                 "${MOBILECONFIG_FORCE_ARG[@]:+${MOBILECONFIG_FORCE_ARG[@]}}"
         fi
 
@@ -348,7 +396,7 @@ if [ "${USE_YUBIKEY}" = "true" ]; then
         echo "  - Directory   : ${CLIENT_DEVICE_DIR}"
         echo "  - PKCS#12     : ${CLIENT_P12}"
         if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
-            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}.mobileconfig"
+            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}${MOBILECONFIG_SUFFIX}.mobileconfig (TLS ${MOBILECONFIG_TLS_VERSION})"
         fi
         echo "=============================================================================="
         exit 0
@@ -571,11 +619,22 @@ else
             if [ "${FORCE}" = "true" ]; then
                 MOBILECONFIG_FORCE_ARG=(--force)
             fi
+            MOBILECONFIG_EXTRA_ARGS=()
+            if [ -n "${MOBILECONFIG_SSID}" ]; then
+                MOBILECONFIG_EXTRA_ARGS+=(--ssid "${MOBILECONFIG_SSID}")
+            fi
+            if [ "${MOBILECONFIG_TLS_VERSION}" = "1.3" ]; then
+                # Distinct identifier so the profile installs alongside the TLS 1.2 one
+                MOBILECONFIG_EXTRA_ARGS+=(--identifier "${PROFILE_IDENTIFIER:-com.homelab.wifi.eap-tls}.tls1.3")
+            fi
             echo ""
             "${MOBILECONFIG_SCRIPT}" \
                 --server-ca "${SERVER_DIR}/server_root_ca.crt" \
                 --client-p12 "${CLIENT_P12}" \
                 --client-name "${TARGET_CLIENT}" \
+                --tls-version "${MOBILECONFIG_TLS_VERSION}" \
+                --output "${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}${MOBILECONFIG_SUFFIX}.mobileconfig" \
+                "${MOBILECONFIG_EXTRA_ARGS[@]:+${MOBILECONFIG_EXTRA_ARGS[@]}}" \
                 "${MOBILECONFIG_FORCE_ARG[@]:+${MOBILECONFIG_FORCE_ARG[@]}}"
         fi
 
@@ -586,7 +645,7 @@ else
         echo "  - Directory   : ${CLIENT_DEVICE_DIR}"
         echo "  - PKCS#12     : ${CLIENT_P12}"
         if [ "${GENERATE_MOBILECONFIG}" = "true" ]; then
-            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}.mobileconfig"
+            echo "  - Profile     : ${CLIENT_DEVICE_DIR}/${TARGET_CLIENT}${MOBILECONFIG_SUFFIX}.mobileconfig (TLS ${MOBILECONFIG_TLS_VERSION})"
         fi
         echo "=============================================================================="
         exit 0

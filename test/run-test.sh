@@ -7,7 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CERTS_DIR="${REPO_ROOT}/certificate-authority"
+# Directory containing ca.pem, client.crt and client.key (override to test with externally stored credentials)
+CERTS_DIR="${CERTS_DIR:-${REPO_ROOT}/certificate-authority}"
 
 # Target FreeRADIUS NodePort settings (default to cluster node IP and NodePort 31812)
 RADIUS_SERVER="${1:-${RADIUS_SERVER:-10.50.0.100}}"
@@ -35,7 +36,8 @@ if [ -z "${RADIUS_SECRET:-}" ]; then
     exit 1
 fi
 
-IMAGE_NAME="eapol-test:local"
+IMAGE_NAME="${IMAGE_NAME:-eapol-test:local}"
+ALPINE_VERSION="${ALPINE_VERSION:-3.20}"
 
 TEST_IDENTITY="${TEST_IDENTITY:-client-device-01}"
 
@@ -73,7 +75,7 @@ echo "==> Using container engine: ${CONTAINER_CLI}"
 # 2. Check if the eapol-test container image exists, or build it
 if ! ${CONTAINER_CLI} image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
     echo "==> Image '${IMAGE_NAME}' not found locally. Building from ${SCRIPT_DIR}/Dockerfile..."
-    ${CONTAINER_CLI} build -t "${IMAGE_NAME}" -f "${SCRIPT_DIR}/Dockerfile" "${SCRIPT_DIR}"
+    ${CONTAINER_CLI} build --build-arg ALPINE_VERSION="${ALPINE_VERSION}" -t "${IMAGE_NAME}" -f "${SCRIPT_DIR}/Dockerfile" "${SCRIPT_DIR}"
     echo "✔ Successfully built ${IMAGE_NAME}"
 fi
 

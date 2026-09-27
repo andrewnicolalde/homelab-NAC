@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: freeradius-pqc
+  namespace: freeradius-experimentation
+  labels:
+    app: freeradius-pqc
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: freeradius-pqc
+  ports:
+    - name: radsec
+      port: 2083
+      targetPort: 2083
+      nodePort: 32093
+      protocol: TCP
+    - name: radius-auth
+      port: 1812
+      targetPort: 1812
+      nodePort: 31822
+      protocol: UDP
+    - name: radius-acct
+      port: 1813
+      targetPort: 1813
+      nodePort: 31823
+      protocol: UDP

@@ -38,6 +38,12 @@ eap {
         tls_min_version = "1.2"
         tls_max_version = "1.2"
 
+        # Bind the claimed EAP identity to the verified client certificate:
+        # reject the session unless User-Name equals the certificate CN. VLANs
+        # are assigned from User-Name (mods-config/files/authorize), so without
+        # this any valid certificate could claim another device's VLAN.
+        check_cert_cn = %{User-Name}
+
         # Explicitly disable session resumption caching to enforce full mutual re-authentication
         cache {
             enable = no
@@ -55,5 +61,9 @@ eap {
     # --------------------------------------------------------------------------
     tls {
         tls = tls-common
+
+        # Admission and VLAN assignment from the verified client certificate
+        # CN, failing closed; see sites/check-eap-tls
+        virtual_server = check-eap-tls
     }
 }

@@ -29,7 +29,13 @@ This directory provides an automated, containerized test harness using `eapol_te
 ## Prerequisites
 
 1. **Local Container Runtime:** `podman` or `docker` installed on your machine.
-2. **Certificates Generated:** `ca.pem`, `client.crt`, and `client.key` present in `certificate-authority/`.
+2. **Certificates Generated:** `ca.pem`, `client.crt`, and `client.key` present in `certificate-authority/`, or in the directory given by `CERTS_DIR`:
+   - `ca.pem`: RADIUS Server Root CA (`radius-server/server_root_ca.crt`), used to verify the server
+   - `client.crt` / `client.key`: client identity, extracted from its PKCS#12 bundle:
+     ```bash
+     openssl pkcs12 -legacy -in client-device-01.p12 -clcerts -nokeys -out "$CERTS_DIR/client.crt"
+     openssl pkcs12 -legacy -in client-device-01.p12 -nocerts -noenc -out "$CERTS_DIR/client.key"
+     ```
 3. **FreeRADIUS Client Authorized:** 
    FreeRADIUS drops packets from unknown IP addresses. If running the test from your workstation (e.g. `10.10.10.x`), ensure your workstation (or the subnet it's on) is permitted in `k8s/config/clients.conf`:
    ```text
