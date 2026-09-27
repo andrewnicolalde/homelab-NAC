@@ -18,6 +18,8 @@
 # the stock default site still runs 'files' in authorize keyed on User-Name.
 # Any VLAN attributes that lookup added for a claimed name are discarded here
 # before the certificate-based lookup.
+#
+# Each decision is logged as one line on stdout by the cert_log module.
 # ==============================================================================
 server check-eap-tls {
     authorize {
@@ -53,6 +55,12 @@ server check-eap-tls {
             update outer.reply {
                 &User-Name := &TLS-Client-Cert-Common-Name
             }
+
+            # Record the admission (see mods/cert_log)
+            cert_log_admitted
+        }
+        else {
+            cert_log_rejected
         }
     }
 }

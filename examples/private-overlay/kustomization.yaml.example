@@ -16,8 +16,8 @@ resources:
 # Overrides the base ConfigMap with your actual private network definitions
 configMapGenerator:
   - name: freeradius-config
-    # merge keeps the base's eap and shared check-eap-tls/cert_vlan
-    # policy; radiusd will not start without them
+    # merge keeps the base's eap and shared admission policy
+    # (check-eap-tls, cert_vlan, cert_log); radiusd will not start without them
     behavior: merge
     files:
       - clients.conf=./clients.conf

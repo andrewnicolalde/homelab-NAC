@@ -28,7 +28,10 @@ spec:
         - name: freeradius
           image: ghcr.io/andrewnicolalde/homelab-nac/freeradius@sha256:b74e8d0cf81d4e37b4601e2c45225c9f78f350d8ad7ff27c81f0964d3f09757c
           imagePullPolicy: IfNotPresent
-          args: ["-X"]
+          # Foreground, logging to stdout, without debug output: every debug
+          # level (-X, -x) prints the MS-MPPE session keys of each Access-Accept.
+          # Admission decisions are logged by mods-enabled/cert_log instead.
+          args: ["-f", "-l", "stdout"]
           envFrom:
             # RADIUS client shared secrets, referenced from clients.conf as $ENV{...}
             - secretRef:
@@ -90,6 +93,10 @@ spec:
             - name: config
               mountPath: /etc/raddb/mods-enabled/cert_vlan
               subPath: cert_vlan
+              readOnly: true
+            - name: config
+              mountPath: /etc/raddb/mods-enabled/cert_log
+              subPath: cert_log
               readOnly: true
       volumes:
         - name: certs

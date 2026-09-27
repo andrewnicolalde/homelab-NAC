@@ -78,10 +78,24 @@ You can override target parameters via positional arguments:
 
 ## Observing Server Logs in Real Time
 
-In a separate terminal window, monitor FreeRADIUS debugging logs:
+In a separate terminal window, monitor the FreeRADIUS logs:
 
 ```bash
 kubectl logs -n freeradius-experimentation -l app=freeradius -f
+```
+
+FreeRADIUS runs without debug output, because every debug level prints the MS-MPPE session keys of each Access-Accept. The log shows startup messages, errors (such as TLS handshake failures and packets with the wrong shared secret) and one line per EAP-TLS admission decision from `k8s/config/cert_log`:
+
+```text
+... : Auth: EAP-TLS admitted: cn="client-device-01" serial=... issuer="/CN=Enterprise Root CA" vlan=10 mac=02-00-00-00-00-01 nas="" called="" tls="TLS 1.2" cipher=ECDHE-ECDSA-AES256-GCM-SHA384
+... : Auth: EAP-TLS rejected, no authorize entry for certificate: cn="..." ...
+```
+
+To troubleshoot with full debug output, temporarily switch the Deployment to `-X`, then re-apply your overlay to switch it back. The debug output includes session keys, so treat those logs as secret:
+
+```bash
+kubectl -n freeradius-experimentation patch deployment freeradius-test --type=json \
+  -p '[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["-X"]}]'
 ```
 
 ---

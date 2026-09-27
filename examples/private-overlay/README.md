@@ -43,8 +43,8 @@ resources:
   - github.com/andrewnicolalde/homelab-NAC//k8s?ref=main
 
 # Override the site-specific keys of the base ConfigMap. Use merge, not
-# replace: the base also ships eap and the shared check-eap-tls/cert_vlan
-# admission policy, and radiusd will not start without them.
+# replace: the base also ships eap and the shared admission policy
+# (check-eap-tls, cert_vlan, cert_log), and radiusd will not start without them.
 configMapGenerator:
   - name: freeradius-config
     behavior: merge

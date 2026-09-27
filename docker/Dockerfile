@@ -12,4 +12,6 @@ USER radius
 EXPOSE 1812/udp 1813/udp 2083/tcp
 
 ENTRYPOINT ["radiusd"]
-CMD ["-X"]
+# Foreground, logging to stdout. Debug output (-X) is opt-in because it
+# prints the MS-MPPE session keys of every Access-Accept.
+CMD ["-f", "-l", "stdout"]

@@ -29,3 +29,4 @@ configMapGenerator:
       # Shared admission/VLAN policy (also mounted by ../k8s-pqc)
       - check-eap-tls=./config/check-eap-tls
       - cert_vlan=./config/cert_vlan
+      - cert_log=./config/cert_log

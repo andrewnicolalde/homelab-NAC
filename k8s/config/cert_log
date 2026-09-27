@@ -1,0 +1,29 @@
+# ==============================================================================
+# FreeRADIUS linelog Module Instances (mods-enabled/cert_log)
+# One log line per EAP-TLS admission decision, on stdout
+# ==============================================================================
+# Shared by the classical (k8s/) and post-quantum (k8s-pqc/) deployments.
+# Called by the check-eap-tls virtual server (see sites/check-eap-tls), which
+# only runs after the client certificate chain has been verified.
+#
+# radiusd runs without debug output (-X or any -x), because every debug level
+# prints each Access-Accept's MS-MPPE-Send/Recv-Key: the key material the AP
+# derives the Wi-Fi session keys from. Without debug output nothing records
+# which device was admitted, so these lines do, logging only the fields named
+# below.
+#
+# Only authenticated or server-side values are logged: the certificate fields
+# (signed by the trusted CA), attributes set by the authenticator (protected
+# by the RADIUS shared secret) and the negotiated TLS parameters. The claimed
+# outer identity (User-Name) is left out: it is chosen by the supplicant, and
+# a newline in it would let a device forge log lines.
+# ==============================================================================
+linelog cert_log_admitted {
+    filename = /dev/stdout
+    format = "%t : Auth: EAP-TLS admitted: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" vlan=%{reply:Tunnel-Private-Group-Id} mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" tls=\"%{outer.session-state:TLS-Session-Version}\" cipher=%{outer.session-state:TLS-Session-Cipher-Suite}"
+}
+
+linelog cert_log_rejected {
+    filename = /dev/stdout
+    format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\""
+}

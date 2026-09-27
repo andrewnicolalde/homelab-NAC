@@ -78,7 +78,8 @@ homelab-NAC/
 │       ├── authorize.example               # RFC 3580 identity-to-VLAN mapping
 │       ├── eap                             # Strict Suite B EAP-TLS configuration
 │       ├── check-eap-tls                   # Shared fail-closed admission policy (virtual server)
-│       └── cert_vlan                       # files instance keyed on the certificate CN
+│       ├── cert_vlan                       # files instance keyed on the certificate CN
+│       └── cert_log                        # One stdout line per admission decision
 ├── k8s-pqc/                                # Experimental Post-Quantum Deployment (Kustomize)
 │   ├── 01-deployment-pqc.yaml              # FreeRADIUS deployment sharing certs/clients/authorize
 │   ├── 02-service-pqc.yaml                 # NodePort service exposing 31822, 31823, 32093
@@ -302,6 +303,8 @@ A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside th
 | **NodePorts** | `31822/UDP` (auth), `31823/UDP` (acct), `32093/TCP` (RadSec) |
 
 Both deployments share one admission policy, defined in `k8s/config/` and shipped in the `freeradius-config` ConfigMap. The stock default site is kept. EAP-TLS calls the `check-eap-tls` virtual server (`k8s/config/check-eap-tls`) once the client certificate is verified; it discards any VLAN attributes the default site derived from the claimed `User-Name`, then looks up the certificate CN with a `files` instance (`k8s/config/cert_vlan`) that reads the shared `authorize` file. The request is accepted only if that lookup matched, so a valid certificate without an `authorize` entry is rejected and a device cannot obtain another identity's VLAN by claiming its name. The Access-Accept returns the certificate CN as `User-Name`, so the authenticator sees the real device name rather than `anonymous`. Private overlays must generate `freeradius-config` with `behavior: merge` so the policy keys from the base are kept.
+
+Both servers run without debug output (`-f -l stdout`), because every debug level prints the MS-MPPE session keys of each Access-Accept. `check-eap-tls` instead logs one line per admission decision through two `linelog` instances (`k8s/config/cert_log`), recording only authenticated fields: the certificate CN, serial and issuer, the VLAN, the authenticator's station and SSID attributes, and the negotiated TLS version and cipher suite.
 
 Handshakes are rejected with `no suitable key share` (classical-only TLS 1.3 clients) or `protocol_version` (TLS 1.2 clients).
 
