@@ -8,14 +8,19 @@ resources:
   # - github.com/andrewnicolalde/homelab-NAC//k8s?ref=main
   # For local testing relative to this repository:
   - ../../k8s
+  # Optional: post-quantum (TLS 1.3 + hybrid ML-KEM) deployment. Shares the
+  # certs Secret and clients.conf/authorize ConfigMap generated below.
+  # - github.com/andrewnicolalde/homelab-NAC//k8s-pqc?ref=main
+  # - ../../k8s-pqc
 
 # Overrides the base ConfigMap with your actual private network definitions
 configMapGenerator:
   - name: freeradius-config
-    behavior: replace
+    # merge (not replace) keeps the base's eap and shared check-eap-tls/cert_vlan
+    # policy; radiusd will not start without them
+    behavior: merge
     files:
       - clients.conf=./clients.conf
-      - eap=./eap
       - authorize=./authorize
 
 # Overrides the base Secret with your actual PKI certificates and private keys

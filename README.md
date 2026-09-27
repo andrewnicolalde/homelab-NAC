@@ -76,7 +76,16 @@ homelab-NAC/
 │   └── config/                             # Base configuration templates (.example)
 │       ├── clients.conf.example            # Sanitized authenticator definitions
 │       ├── authorize.example               # RFC 3580 identity-to-VLAN mapping
-│       └── eap                             # Strict Suite B EAP-TLS configuration
+│       ├── eap                             # Strict Suite B EAP-TLS configuration
+│       ├── check-eap-tls                   # Shared fail-closed admission policy (virtual server)
+│       └── cert_vlan                       # files instance keyed on the certificate CN
+├── k8s-pqc/                                # Experimental Post-Quantum Deployment (Kustomize)
+│   ├── 01-deployment-pqc.yaml              # FreeRADIUS deployment sharing certs/clients/authorize
+│   ├── 02-service-pqc.yaml                 # NodePort service exposing 31822, 31823, 32093
+│   ├── kustomization.yaml                  # Generates the PQ-specific ConfigMap
+│   └── config/
+│       ├── eap                             # EAP-TLS 1.3, hybrid ML-KEM groups only
+│       └── openssl.cnf                     # Pins TLS 1.3 ciphersuite via OPENSSL_CONF
 ├── examples/private-overlay/               # Decoupled Private Overlay Template
 │   ├── README.md                           # Guide for private overlay architecture
 │   ├── certs.env.example                   # Site parameter template (SANs, identities)
@@ -106,6 +115,8 @@ This implementation strictly adheres to the **NSA CNSA 1.0 (Suite B 192-bit)** s
 | **Data Frame Cipher** | **GCMP-256 (`00:0f:ac:9`)** | Both Pairwise and Group ciphers use Galois/Counter Mode 256-bit. |
 | **Management Frames** | **BIP-GMAC-256 (PMF Mandatory)** | Protected Management Frames enforced; non-PMF clients blocked. |
 | **Session Cache Policy** | **Disabled (`cache { enable = no }`)** | Enforces full mutual TLS handshake on every reconnection (no session resumption). |
+| **Identity Binding** | **`check_cert_cn = %{User-Name}`** | The EAP identity must equal the client certificate CN, so a device cannot claim another identity's VLAN. |
+| **Admission Policy** | **Fail closed (`check-eap-tls` + `cert_vlan`)** | Only certificates whose CN has an entry in `authorize` are accepted; that entry alone selects the VLAN. Removing an entry revokes access. |
 | **Server SAN Policy** | **DNS Domain Names (`FQDN`)** | Enforces valid DNS SANs (e.g. `radius.internal.example.com`) for strict supplicant validation. |
 
 ---
@@ -276,6 +287,29 @@ kubectl kustomize ./k8s
 # Apply to cluster:
 kubectl apply -k .
 ```
+
+### 4. Experimental Post-Quantum Deployment (`k8s-pqc/`)
+A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside the classical one in the same namespace. It accepts **only** EAP-TLS 1.3 handshakes that establish keys with a hybrid post-quantum group; there is no classical fallback.
+
+| Parameter | Value |
+| :--- | :--- |
+| **TLS Version** | TLS 1.3 only (RFC 9190) |
+| **Key Exchange** | `X25519MLKEM768` or `SecP384r1MLKEM1024` (hybrid ML-KEM) |
+| **Cipher Suite** | `TLS_AES_256_GCM_SHA384` (pinned via `OPENSSL_CONF`; FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite option) |
+| **Authentication** | Unchanged: ECDSA P-384 certificates from the same PKI |
+| **Outer Identity** | `anonymous` (Apple requires one for EAP-TLS 1.3); the device name is only sent inside the encrypted handshake |
+| **Admission & VLAN** | Shared fail-closed policy: `authorize` entries matched on the client certificate CN (`TLS-Client-Cert-Common-Name`), not on `User-Name`; certificates without an entry are rejected |
+| **NodePorts** | `31822/UDP` (auth), `31823/UDP` (acct), `32093/TCP` (RadSec) |
+
+Both deployments share one admission policy, defined in `k8s/config/` and shipped in the `freeradius-config` ConfigMap. The stock default site is kept. EAP-TLS calls the `check-eap-tls` virtual server (`k8s/config/check-eap-tls`) once the client certificate is verified; it discards any VLAN attributes the default site derived from the claimed `User-Name`, then looks up the certificate CN with a `files` instance (`k8s/config/cert_vlan`) that reads the shared `authorize` file. The request is accepted only if that lookup matched, so a valid certificate without an `authorize` entry is rejected and a device cannot obtain another identity's VLAN by claiming its name. The Access-Accept returns the certificate CN as `User-Name`, so the authenticator sees the real device name rather than `anonymous`. Private overlays must generate `freeradius-config` with `behavior: merge` so the policy keys from the base are kept.
+
+Handshakes are rejected with `no suitable key share` (classical-only TLS 1.3 clients) or `protocol_version` (TLS 1.2 clients).
+
+* **Authenticator:** Point a separate SSID's RADIUS profile at the PQ NodePorts. Use standard WPA3-Enterprise rather than 192-bit mode: Suite B restricts the supplicant's key exchange to P-384.
+* **Apple clients:** Generate a TLS 1.3 profile for a test SSID with `generate-certs.sh --client client-device-01 --mobileconfig --tls-version 1.3 --ssid <test-ssid>`. It reuses the existing P12 and is written as `client-device-01-tls1.3.mobileconfig` with identifier `<identifier>.tls1.3`, so it installs alongside the TLS 1.2 profile. TLS 1.3 profiles always set `OuterIdentity` to `anonymous`. (`generate-mobileconfig.sh --tls-version 1.3` works standalone too.)
+* **Testing:** `test/eapol_test-pqc.conf` requires an `eapol_test` image built against OpenSSL >= 3.5 (`ALPINE_VERSION=3.24.1`).
+
+`k8s-pqc/` references the `freeradius-certs` Secret and `freeradius-config` ConfigMap generated by `k8s/`, so deploy both from a single overlay that lists both directories as resources (see the root `kustomization.yaml`).
 
 ---
 

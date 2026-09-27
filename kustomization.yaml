@@ -3,3 +3,4 @@ kind: Kustomization
 
 resources:
   - k8s/
+  - k8s-pqc/

@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Post-quantum (TLS 1.3 + hybrid ML-KEM) FreeRADIUS deployment.
+# Runs alongside the classical deployment in ../k8s, sharing its namespace,
+# 'freeradius-certs' Secret and 'freeradius-config' ConfigMap (clients.conf,
+# authorize, and the check-eap-tls/cert_vlan admission policy). Deploy both
+# together from an overlay that lists ../k8s and ../k8s-pqc as resources so
+# the generated names resolve.
+namespace: freeradius-experimentation
+
+resources:
+  - 01-deployment-pqc.yaml
+  - 02-service-pqc.yaml
+
+configMapGenerator:
+  - name: freeradius-pqc-config
+    files:
+      - eap=./config/eap
+      - openssl.cnf=./config/openssl.cnf

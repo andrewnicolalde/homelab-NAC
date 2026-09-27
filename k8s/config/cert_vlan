@@ -1,0 +1,18 @@
+# ==============================================================================
+# FreeRADIUS files Module Instance (mods-enabled/cert_vlan)
+# Device lookup keyed on the verified client certificate CN
+# ==============================================================================
+# Shared by the classical (k8s/) and post-quantum (k8s-pqc/) deployments.
+# Reads the same device-to-VLAN 'authorize' file as the stock 'files' module,
+# but matches entries against TLS-Client-Cert-Common-Name instead of the
+# claimed User-Name (which post-quantum supplicants send as "anonymous").
+#
+# The certificate attributes only exist once the client certificate has been
+# verified, so this instance is called from the check-eap-tls virtual server
+# (see sites/check-eap-tls), not from the default site's authorize section.
+# It returns 'ok' when an entry matched and 'noop' otherwise.
+# ==============================================================================
+files cert_vlan {
+    key = "%{TLS-Client-Cert-Common-Name}"
+    filename = ${modconfdir}/files/authorize
+}
