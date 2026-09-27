@@ -294,7 +294,7 @@ A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside th
 | Parameter | Value |
 | :--- | :--- |
 | **TLS Version** | TLS 1.3 only (RFC 9190) |
-| **Key Exchange** | `X25519MLKEM768` or `SecP384r1MLKEM1024` (hybrid ML-KEM) |
+| **Key Exchange** | `SecP384r1MLKEM1024` (preferred) or `X25519MLKEM768` (hybrid ML-KEM); the server's order wins (`cipher_server_preference`) when a client sends key shares for both |
 | **Cipher Suite** | `TLS_AES_256_GCM_SHA384` (pinned via `OPENSSL_CONF`; FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite option) |
 | **Authentication** | Unchanged: ECDSA P-384 certificates from the same PKI |
 | **Outer Identity** | `anonymous` (Apple requires one for EAP-TLS 1.3); the device name is only sent inside the encrypted handshake |
@@ -305,7 +305,7 @@ Both deployments share one admission policy, defined in `k8s/config/` and shippe
 
 Handshakes are rejected with `no suitable key share` (classical-only TLS 1.3 clients) or `protocol_version` (TLS 1.2 clients).
 
-* **Authenticator:** Point a separate SSID's RADIUS profile at the PQ NodePorts. Use standard WPA3-Enterprise rather than 192-bit mode: Suite B restricts the supplicant's key exchange to P-384.
+* **Authenticator:** Point a separate SSID's RADIUS profile at the PQ NodePorts. WPA3-Enterprise 192-bit mode works with Apple clients, which negotiate `X25519MLKEM768` with it enabled. Supplicants that apply the Suite B TLS profile (P-384 key exchange only), such as `wpa_supplicant` with `phase1="tls_suiteb=1"`, will be rejected, since they won't advertise support for `X25519MLKEM768`.
 * **Apple clients:** Generate a TLS 1.3 profile for a test SSID with `generate-certs.sh --client client-device-01 --mobileconfig --tls-version 1.3 --ssid <test-ssid>`. It reuses the existing P12 and is written as `client-device-01-tls1.3.mobileconfig` with identifier `<identifier>.tls1.3`, so it installs alongside the TLS 1.2 profile. TLS 1.3 profiles always set `OuterIdentity` to `anonymous`. (`generate-mobileconfig.sh --tls-version 1.3` works standalone too.)
 * **Testing:** `test/eapol_test-pqc.conf` requires an `eapol_test` image built against OpenSSL >= 3.5 (`ALPINE_VERSION=3.24.1`).
 

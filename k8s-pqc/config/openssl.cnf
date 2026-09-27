@@ -18,4 +18,4 @@ system_default = tls_system_default
 MinProtocol = TLSv1.3
 MaxProtocol = TLSv1.3
 Ciphersuites = TLS_AES_256_GCM_SHA384
-Groups = X25519MLKEM768:SecP384r1MLKEM1024
+Groups = SecP384r1MLKEM1024:X25519MLKEM768
