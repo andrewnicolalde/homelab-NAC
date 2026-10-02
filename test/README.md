@@ -76,6 +76,31 @@ You can override target parameters via positional arguments:
 
 ---
 
+## Guarantee Tests (`guarantees.sh`)
+
+`run-test.sh` checks one live authentication. `guarantees.sh` checks that every property the setup relies on holds, for both the classical and the post-quantum deployment. Each `test_*` function is named after the guarantee it checks.
+
+| Layer | What it checks | Needs |
+|---|---|---|
+| `test_static_*` | The repository's configuration and manifests: the admission policy is wired into both servers and fails closed, the certificate lookup uses the verified CN, TLS versions, groups and suites, session resumption, Message-Authenticator and secrets in `clients.conf`, logging, container hardening, image pinning, overlay `merge` behaviour | bash only |
+| `test_image_*` | The stock configuration inside the pinned FreeRADIUS image | podman or docker |
+| `test_both_*`, `test_classical_*`, `test_pqc_*` | Real authentications against each server in a disposable lab: registered, unregistered, expired, untrusted-CA and missing certificates; identity binding; TLS version, group and suite policy; password-based methods; wrong shared secret; re-authentication; and afterwards, that the log has one line per admission and no keys or secrets | podman or docker, the `eapol-test:pqc` image |
+
+The lab uses the Deployment's pinned image and `radiusd` arguments with the repository's own `eap`, `check-eap-tls`, `cert_vlan`, `cert_log`, `clients.conf.example` and `openssl.cnf`, and a throwaway PKI generated for each run. Nothing real is used.
+
+```bash
+./test/guarantees.sh --static        # configuration only, in seconds
+./test/guarantees.sh                 # everything, about 90 seconds
+./test/guarantees.sh --only pqc      # tests whose name matches a regex
+
+# Also check a private overlay's clients.conf, authorize and kustomization.yaml
+PRIVATE_CONFIG_DIR=../homelab-network-private ./test/guarantees.sh --static
+```
+
+The exit status is the number of failed tests. Set `RADIUS_IMAGE` if the pinned digest is not available locally.
+
+---
+
 ## Observing Server Logs in Real Time
 
 In a separate terminal window, monitor the FreeRADIUS logs:

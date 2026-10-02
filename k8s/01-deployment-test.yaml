@@ -7,6 +7,20 @@ metadata:
     app: freeradius
 spec:
   replicas: 1
+  # Configuration changes roll out on 'kubectl apply -k' without an image build
+  # or a manual restart: kustomize names each generated ConfigMap after a hash
+  # of its contents, so changing any mounted file (radiusd.conf included)
+  # changes the pod template and starts a new pod. The old pod keeps serving
+  # until the new one has stayed up for minReadySeconds. radiusd exits within a
+  # second on broken configuration, so a broken change never replaces a working
+  # server: the rollout stalls instead (see "Changing the server
+  # configuration" in the README).
+  minReadySeconds: 15
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: freeradius
@@ -52,6 +66,12 @@ spec:
               containerPort: 1813
               protocol: UDP
           volumeMounts:
+            # Server settings (proxying off). The image ships a copy as its
+            # default; this mount lets it change without an image build.
+            - name: config
+              mountPath: /etc/raddb/radiusd.conf
+              subPath: radiusd.conf
+              readOnly: true
             - name: certs
               mountPath: /etc/raddb/certs/ca.pem
               subPath: ca.pem

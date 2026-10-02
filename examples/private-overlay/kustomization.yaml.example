@@ -17,7 +17,8 @@ resources:
 configMapGenerator:
   - name: freeradius-config
     # merge keeps the base's eap and shared admission policy
-    # (check-eap-tls, cert_vlan, cert_log); radiusd will not start without them
+    # (check-eap-tls, cert_vlan, cert_log), which radiusd will not start
+    # without, and its radiusd.conf (server settings, proxying off)
     behavior: merge
     files:
       - clients.conf=./clients.conf

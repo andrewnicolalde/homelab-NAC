@@ -23,6 +23,8 @@ secretGenerator:
 configMapGenerator:
   - name: freeradius-config
     files:
+      # Server settings; also baked into the image as its default
+      - radiusd.conf=./config/radiusd.conf
       - clients.conf=./config/clients.conf.example
       - eap=./config/eap
       - authorize=./config/authorize.example

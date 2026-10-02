@@ -65,7 +65,7 @@ homelab-NAC/
 │   ├── generate-certificate-authorities.sh # YubiKey PIV hardware key generator (Slots 9c, 9d, 82)
 │   └── generate-certs.sh                  # Multi-mode certificate provisioning engine
 ├── docker/                                 # FreeRADIUS Container Build
-│   ├── Dockerfile                          # Minimal Alpine 3.24 unprivileged FreeRADIUS image
+│   ├── Dockerfile                          # FreeRADIUS 3.2.10 built from source on Alpine 3.24, unprivileged
 │   └── build.sh                            # Local container build helper
 ├── k8s/                                    # Base Kubernetes Manifests (Kustomize)
 │   ├── 00-namespace.yaml                   # freeradius-experimentation namespace
@@ -74,6 +74,7 @@ homelab-NAC/
 │   ├── kustomization.yaml                  # Base Kustomize resource definition
 │   ├── setup-ghcr-auth.sh                  # Pull secret setup helper
 │   └── config/                             # Base configuration templates (.example)
+│       ├── radiusd.conf                    # Server settings (stock, proxying off); also the image default
 │       ├── clients.conf.example            # Sanitized authenticator definitions
 │       ├── authorize.example               # RFC 3580 identity-to-VLAN mapping
 │       ├── eap                             # Strict Suite B EAP-TLS configuration
@@ -289,7 +290,25 @@ kubectl kustomize ./k8s
 kubectl apply -k .
 ```
 
-### 4. Experimental Post-Quantum Deployment (`k8s-pqc/`)
+### 4. Changing the Server Configuration
+The server's own settings live in `k8s/config/radiusd.conf` (the stock FreeRADIUS settings with proxying turned off). The file is used in two places:
+
+* **Mounted by both Deployments** from the `freeradius-config` ConfigMap, overriding the image's copy.
+* **Shipped in the image** as its default, so the image never runs with the stock settings even without the mount. This copy is only refreshed when the image is rebuilt, so it may lag behind the mounted one.
+
+**Why it is mounted rather than only baked into the image:** this runs on a Kubernetes cluster. Changing a server setting should not require a full image build followed by a manual `kubectl rollout restart` of each Deployment, and a change that turns out to be broken should not take down a working server.
+
+How a change reaches the cluster:
+
+1. Edit `k8s/config/radiusd.conf` and test it locally with `test/guarantees.sh`, which mounts the same file into its lab servers. No image build is needed.
+2. Run `kubectl apply -k` from your overlay. Kustomize names the ConfigMap after a hash of its contents, so a changed file changes the Deployments' pod templates and Kubernetes starts new pods automatically.
+3. Each Deployment keeps its old pod serving until the new pod has stayed up for 15 seconds (`minReadySeconds: 15`, `maxUnavailable: 0`). FreeRADIUS exits within a second when its configuration is broken, so a broken change never replaces a working server: the new pod restarts repeatedly and the rollout stalls. `kubectl rollout status` reports it, and `kubectl logs --previous` on the new pod shows the configuration error. Fix the file and apply again, or run `kubectl rollout undo`.
+
+This only catches configuration FreeRADIUS refuses to load. A change that loads but behaves differently (for example, a setting with the wrong value) is caught by `test/guarantees.sh`, not by the rollout.
+
+The other mounted files (`eap`, `clients.conf`, `authorize` and the admission policy) roll out the same way.
+
+### 5. Experimental Post-Quantum Deployment (`k8s-pqc/`)
 A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside the classical one in the same namespace. It accepts **only** EAP-TLS 1.3 handshakes that establish keys with a hybrid post-quantum group; there is no classical fallback.
 
 | Parameter | Value |
