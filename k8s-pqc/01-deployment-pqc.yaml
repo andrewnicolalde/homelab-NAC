@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: freeradius
-          image: ghcr.io/andrewnicolalde/homelab-nac/freeradius@sha256:4913324733a6047a9b71cfa62ce9e250b614d94fabaa6b2a7f783ba89c05e368
+          image: ghcr.io/andrewnicolalde/homelab-nac/freeradius@sha256:4913324733a6047a9b71cfa62ce9e250b614d94fabaa6b2a7f783ba89c05e368 # FreeRADIUS 3.2.10
           imagePullPolicy: IfNotPresent
           # Foreground, logging to stdout, without debug output: every debug
           # level (-X, -x) prints the MS-MPPE session keys of each Access-Accept.
