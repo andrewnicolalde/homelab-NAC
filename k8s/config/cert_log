@@ -14,16 +14,17 @@
 #
 # Only authenticated or server-side values are logged: the certificate fields
 # (signed by the trusted CA), attributes set by the authenticator (protected
-# by the RADIUS shared secret) and the negotiated TLS parameters. The claimed
+# by the RADIUS shared secret; ssid= is the SSID part of Called-Station-Id,
+# split out by check-eap-tls) and the negotiated TLS parameters. The claimed
 # outer identity (User-Name) is left out: it is chosen by the supplicant, and
 # a newline in it would let a device forge log lines.
 # ==============================================================================
 linelog cert_log_admitted {
     filename = /dev/stdout
-    format = "%t : Auth: EAP-TLS admitted: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" vlan=%{reply:Tunnel-Private-Group-Id} mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" tls=\"%{outer.session-state:TLS-Session-Version}\" cipher=%{outer.session-state:TLS-Session-Cipher-Suite}"
+    format = "%t : Auth: EAP-TLS admitted: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" vlan=%{reply:Tunnel-Private-Group-Id} mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\" tls=\"%{outer.session-state:TLS-Session-Version}\" cipher=%{outer.session-state:TLS-Session-Cipher-Suite}"
 }
 
 linelog cert_log_rejected {
     filename = /dev/stdout
-    format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\""
+    format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\""
 }

@@ -103,7 +103,7 @@ The post-quantum server's TLS 1.3 cipher-suite tests offer each suite on its own
 
 ### Mutation Check (`mutation-check.sh`)
 
-A passing test only means something if it fails when the setting it guards is broken. `mutation-check.sh` copies the repository to a temporary directory and deliberately weakens one setting in the copy's `eap` configuration at a time: it removes or widens `cipher_suites`, prefers AES-128, allows TLS 1.2, removes `sigalgs_list` or `@SECLEVEL=4`, adds P-256 to the classical server's `ecdh_curve`, or puts OpenSSL's `SUITEB192` keyword at the start of the PQC server's `cipher_list` (which replaces its hybrid groups with classical P-384 and discards `@SECLEVEL=4`). It then checks that the tests guarding that setting fail. The working tree is never modified.
+A passing test only means something if it fails when the setting it guards is broken. `mutation-check.sh` copies the repository to a temporary directory and deliberately weakens one setting in the copy's `eap` configuration at a time: it removes or widens `cipher_suites`, prefers AES-128, allows TLS 1.2, removes `sigalgs_list` or `@SECLEVEL=4`, adds P-256 to the classical server's `ecdh_curve`, or puts OpenSSL's `SUITEB192` keyword at the start of the PQC server's `cipher_list` (which replaces its hybrid groups with classical P-384 and discards `@SECLEVEL=4`). One mutation also removes the SSID split from `check-eap-tls`, which the SSID logging test must catch. It then checks that the tests guarding that setting fail. The working tree is never modified.
 
 ```bash
 ./test/mutation-check.sh                  # every mutation, a few minutes
@@ -133,7 +133,7 @@ kubectl logs -n freeradius-experimentation -l app=freeradius -f
 FreeRADIUS runs without debug output, because every debug level prints the MS-MPPE session keys of each Access-Accept. The log shows startup messages, errors (such as TLS handshake failures and packets with the wrong shared secret) and one line per EAP-TLS admission decision from `k8s/config/cert_log`:
 
 ```text
-... : Auth: EAP-TLS admitted: cn="client-device-01" serial=... issuer="/CN=Enterprise Root CA" vlan=10 mac=02-00-00-00-00-01 nas="" called="" tls="TLS 1.2" cipher=ECDHE-ECDSA-AES256-GCM-SHA384
+... : Auth: EAP-TLS admitted: cn="client-device-01" serial=... issuer="/CN=Enterprise Root CA" vlan=10 mac=02-00-00-00-00-01 nas="" called="" ssid="" tls="TLS 1.2" cipher=ECDHE-ECDSA-AES256-GCM-SHA384
 ... : Auth: EAP-TLS rejected, no authorize entry for certificate: cn="..." ...
 ```
 

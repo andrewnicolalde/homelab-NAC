@@ -560,6 +560,7 @@ server_log() { local log; log=$(${CLI} logs "${SRV}" 2>&1); printf '%s\n' "${log
 #   --groups <client config name>     client OpenSSL configuration (cl-<name>.cnf)
 #   --secret <secret>                 shared secret (default: the lab secret)
 #   --reauth                          authenticate twice in one run
+#   --called <AP MAC>:<SSID>          send this Called-Station-Id, as an AP does
 # Sets EAP_RESULT (SUCCESS|FAILURE), EAP_VLANS (VLANs in the final
 # Access-Accept, comma-separated), EAP_USER (its User-Name), EAP_OUT (file)
 # ------------------------------------------------------------------------------
@@ -573,6 +574,7 @@ eap() {
             --groups) groups=$2; shift 2 ;;
             --secret) secret=$2; shift 2 ;;
             --reauth) extra+=(-r1); shift ;;
+            --called) extra+=(-N"30:s:$2"); shift 2 ;;   # Called-Station-Id
         esac
     done
     [ "${tls}" = default ] && { [ "${MODE}" = pqc ] && tls=tls13 || tls=tls12; }
@@ -764,6 +766,25 @@ test_both_wrong_shared_secret_gets_no_answer() {
     expect_eq "${EAP_RESULT}" "FAILURE" "authentication result"
     grep -q 'Received RADIUS message' "${EAP_OUT}" && fail "the server must not answer a request with the wrong secret"
     server_log | grep -c 'Shared secret is incorrect' >/dev/null || fail "the server should log the shared secret mismatch"
+}
+
+# The SSID an AP reports in Called-Station-Id ("<AP radio MAC>:<SSID>",
+# RFC 3580) is logged as its own field, for admissions and rejections, while
+# called= still shows the attribute exactly as the AP sent it
+test_both_cert_log_records_the_ssid() {
+    local id=client-device-01 called=02-00-00-00-00-AA:ENTERPRISE-WIFI kind line i
+    [ "${MODE}" = pqc ] && id=anonymous
+    eap dev01 "${id}" --called "${called}"; expect_accept 10
+    eap dev99 client-device-99 --called "${called}"; expect_reject
+    for kind in admitted rejected; do
+        for i in $(seq 20); do
+            line=$(server_log | grep "EAP-TLS ${kind}" | grep -F "called=\"${called}\"" | tail -n1)
+            [ -n "${line}" ] && break
+            sleep 0.25
+        done
+        expect_eq "$(echo "${line}" | sed -nE 's/.* ssid="([^"]*)".*/\1/p')" "ENTERPRISE-WIFI" "ssid= on the ${kind} line"
+        expect_eq "$(echo "${line}" | sed -nE 's/.* called="([^"]*)".*/\1/p')" "${called}" "called= on the ${kind} line, unchanged"
+    done
 }
 
 test_both_reauthentication_applies_the_policy_again() {

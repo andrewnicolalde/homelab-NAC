@@ -23,6 +23,14 @@
 # ==============================================================================
 server check-eap-tls {
     authorize {
+        # Split the authenticator's Called-Station-Id ("<AP radio MAC>:<SSID>",
+        # RFC 3580) with the stock policy (policy.d/canonicalization), so
+        # cert_log can record the SSID as its own field (Called-Station-SSID).
+        # This server works on a copy of the outer request's attributes, so
+        # the outer request, and the called= field logged from it, are
+        # unchanged. Logging only: nothing below depends on it.
+        rewrite_called_station_id
+
         # Discard VLAN attributes derived from the claimed User-Name.
         # EAP-TLS appends this server's reply to the outer reply rather than
         # replacing it, so anything the default site's lookup added must be

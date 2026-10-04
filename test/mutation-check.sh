@@ -58,6 +58,8 @@ MUTATIONS=(
     # which overrides ecdh_curve with P-384 (in TLS 1.3 too) and discards the
     # rest of the string, @SECLEVEL=4 included
     "suiteb192-pqc|k8s-pqc/config/eap|s/^( *cipher_list = \")[^:]*/\1SUITEB192/|test_pqc_every_classical_key_exchange_group_is_rejected|test_pqc_accepts_each_hybrid_group"
+    # Without the Called-Station-Id split, cert_log has no SSID to record
+    "no-ssid-split|k8s/config/check-eap-tls|/^ *rewrite_called_station_id$/d|test_both_cert_log_records_the_ssid"
     "tls12-allowed-with-classical-group|k8s-pqc/config/eap|s/^( *tls_min_version = ).*/\1\"1.2\"/;s/^( *ecdh_curve = \")/\1secp384r1:/|test_pqc_tls12_is_rejected"
 )
 
