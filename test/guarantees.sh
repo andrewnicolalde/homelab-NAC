@@ -68,6 +68,8 @@ DOCKERFILE="${REPO}/docker/Dockerfile"
 # Every TLS 1.3 cipher suite (RFC 8446 and OpenSSL)
 TLS13_SUITES=(TLS_AES_256_GCM_SHA384 TLS_AES_128_GCM_SHA256 TLS_CHACHA20_POLY1305_SHA256
               TLS_AES_128_CCM_SHA256 TLS_AES_128_CCM_8_SHA256)
+# Every classical (non-hybrid) elliptic-curve key exchange group in TLS 1.3
+CLASSICAL_GROUPS=(X25519 X448 P-256 P-384 P-521)
 CLIENTS_FILES=("${REPO}/k8s/config/clients.conf.example")
 AUTHORIZE_FILES=("${REPO}/k8s/config/authorize.example")
 OVERLAY_FILES=("${REPO}/examples/private-overlay/kustomization.yaml.example")
@@ -225,7 +227,7 @@ test_static_classical_tls_policy_is_cnsa_suite_b() {
     body=$(section_body "${EAP_CLASSICAL}" "tls-config tls-common")
     expect_eq "$(echo "${body}" | conf_value tls_min_version)" "1.2" "classical tls_min_version"
     expect_eq "$(echo "${body}" | conf_value tls_max_version)" "1.2" "classical tls_max_version"
-    expect_eq "$(echo "${body}" | conf_value cipher_list)" "ECDHE-ECDSA-AES256-GCM-SHA384" "classical cipher_list"
+    expect_eq "$(echo "${body}" | conf_value cipher_list)" "ECDHE-ECDSA-AES256-GCM-SHA384:@SECLEVEL=4" "classical cipher_list"
     expect_eq "$(echo "${body}" | conf_value ecdh_curve)" "secp384r1" "classical ecdh_curve"
 }
 
@@ -235,10 +237,30 @@ test_static_pqc_tls_policy_allows_only_tls13_aes256_and_hybrid_groups() {
     expect_eq "$(echo "${body}" | conf_value tls_min_version)" "1.3" "PQ tls_min_version"
     expect_eq "$(echo "${body}" | conf_value tls_max_version)" "1.3" "PQ tls_max_version"
     expect_eq "$(echo "${body}" | conf_value cipher_suites)" "TLS_AES_256_GCM_SHA384" "PQ cipher_suites"
+    # Pinned exactly, not just its @SECLEVEL suffix: other keywords in this
+    # string also apply to TLS 1.3 (a leading SUITEB192 discards the rest of
+    # the string and replaces ecdh_curve with classical P-384)
+    expect_eq "$(echo "${body}" | conf_value cipher_list)" "ECDHE-ECDSA-AES256-GCM-SHA384:@SECLEVEL=4" "PQ cipher_list"
     curves=$(echo "${body}" | conf_value ecdh_curve)
     [ -n "${curves}" ] || fail "PQ ecdh_curve must be set"
     for g in $(echo "${curves}" | tr ':' ' '); do
         [[ "${g}" == *MLKEM* ]] || fail "PQ ecdh_curve contains non-hybrid group ${g}"
+    done
+}
+
+test_static_both_servers_hold_certificates_to_a_192_bit_security_level() {
+    local f
+    for f in "${EAP_CLASSICAL}" "${EAP_PQC}"; do
+        [[ "$(section_body "${f}" "tls-config tls-common" | conf_value cipher_list)" == *:@SECLEVEL=4 ]] \
+            || fail "cipher_list must end in :@SECLEVEL=4 [$(basename "$(dirname "$(dirname "${f}")")")]"
+    done
+}
+
+test_static_both_servers_accept_only_ecdsa_p384_sha384_signatures() {
+    local f
+    for f in "${EAP_CLASSICAL}" "${EAP_PQC}"; do
+        expect_eq "$(section_body "${f}" "tls-config tls-common" | conf_value sigalgs_list)" \
+            "ecdsa_secp384r1_sha384" "sigalgs_list [$(basename "$(dirname "$(dirname "${f}")")")]"
     done
 }
 
@@ -434,7 +456,8 @@ lab_setup() {
     cat > "${WORK}/pki/make.sh" <<'EOF'
 set -eu
 cd /pki
-key() { openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$1" 2>/dev/null; }
+CURVE=P-384 DIGEST=sha384
+key() { openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:$CURVE -out "$1" 2>/dev/null; }
 ca() { key "$1.key"; openssl req -x509 -new -key "$1.key" -sha384 -days 3 -subj "/CN=$2" \
        -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign -out "$1.crt"; }
 leaf() { # file cn issuer [x509 validity args]
@@ -442,7 +465,7 @@ leaf() { # file cn issuer [x509 validity args]
     key "$f.key"; openssl req -new -key "$f.key" -subj "/CN=$cn" -out "$f.csr"
     printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth,clientAuth\n' > "$f.ext"
     [ $# -gt 0 ] || set -- -days 3
-    openssl x509 -req -in "$f.csr" -CA "$iss.crt" -CAkey "$iss.key" -CAcreateserial -sha384 -extfile "$f.ext" -out "$f.crt" "$@" 2>/dev/null
+    openssl x509 -req -in "$f.csr" -CA "$iss.crt" -CAkey "$iss.key" -CAcreateserial -$DIGEST -extfile "$f.ext" -out "$f.crt" "$@" 2>/dev/null
 }
 ca user_ca   "Lab Root CA - User Endpoints"
 ca server_ca "Lab Root CA - RADIUS Server"
@@ -454,6 +477,10 @@ leaf dev02   client-device-02 user_ca
 leaf dev99   client-device-99 user_ca
 leaf expired client-device-01 user_ca -not_before 20200101000000Z -not_after 20200102000000Z
 leaf other   client-device-01 other_ca
+# Same device, CA and authorize entry as dev01, but a P-256 key
+CURVE=P-256; leaf dev01p256 client-device-01 user_ca; CURVE=P-384
+# Same device, CA and authorize entry as dev01, but signed by the CA with SHA-256
+DIGEST=sha256; leaf dev01sha256 client-device-01 user_ca; DIGEST=sha384
 chmod 644 ./*
 EOF
     ${CLI} run --rm --entrypoint sh -v "${WORK}/pki:/pki" "${EAPOL_IMAGE}" /pki/make.sh >/dev/null || {
@@ -467,6 +494,7 @@ EOF
       printf '\nclient-device-02\n    Tunnel-Type = VLAN,\n    Tunnel-Medium-Type = IEEE-802,\n    Tunnel-Private-Group-Id = "30"\n'; } \
         > "${WORK}/conf/authorize"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "X25519:P-256" > "${WORK}/conf/cl-classical-groups.cnf"
+    printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nSignatureAlgorithms = %s\n' "ECDSA+SHA256" > "${WORK}/conf/cl-sigalgs-sha256.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "X25519MLKEM768" > "${WORK}/conf/cl-x25519mlkem768.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "SecP384r1MLKEM1024" > "${WORK}/conf/cl-secp384r1mlkem1024.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nCiphersuites = %s\n' "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256" > "${WORK}/conf/cl-aes128.cnf"
@@ -479,6 +507,12 @@ EOF
         [ "${suite}" = all ] && offer=$(IFS=:; echo "${TLS13_SUITES[*]}")
         printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nCipherString = DEFAULT:@SECLEVEL=0\nCiphersuites = %s\n' "${offer}" \
             > "${WORK}/conf/cl-suite-${suite}.cnf"
+    done
+    # One client configuration per classical key exchange group
+    local group
+    for group in "${CLASSICAL_GROUPS[@]}"; do
+        printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "${group}" \
+            > "${WORK}/conf/cl-group-${group}.cnf"
     done
     chmod 644 "${WORK}/conf/"*
 
@@ -632,6 +666,35 @@ offered_tls13_suites() {
     done
     (IFS=,; echo "${out[*]}")
 }
+group_name() {
+    case "$1" in
+        001d) echo X25519 ;; 001e) echo X448 ;;
+        0017) echo P-256 ;;  0018) echo P-384 ;; 0019) echo P-521 ;;
+        11ec) echo X25519MLKEM768 ;; 11ed) echo SecP384r1MLKEM1024 ;;
+        *) echo "0x$1" ;;
+    esac
+}
+# Key exchange groups in the client's ClientHello (supported_groups
+# extension), comma-separated
+offered_groups() {
+    local b i n end type len out=()
+    read -r -a b <<< "$(hello_bytes 'TX ver=.*\(handshake/client hello\)')"
+    [ ${#b[@]} -gt 40 ] || return 0
+    i=$((39 + 16#${b[38]}))                              # cipher suites
+    i=$((i + 2 + 16#${b[i]} * 256 + 16#${b[i+1]}))       # compression methods
+    i=$((i + 1 + 16#${b[i]}))                            # extensions
+    end=$((i + 2 + 16#${b[i]} * 256 + 16#${b[i+1]})); i=$((i + 2))
+    while [ "${i}" -lt "${end}" ]; do
+        type="${b[i]}${b[i+1]}"; len=$((16#${b[i+2]} * 256 + 16#${b[i+3]})); i=$((i + 4))
+        if [ "${type}" = 000a ]; then
+            n=$(( (16#${b[i]} * 256 + 16#${b[i+1]}) / 2 ))
+            for (( i += 2; n > 0; n--, i += 2 )); do out+=("$(group_name "${b[i]}${b[i+1]}")"); done
+            break
+        fi
+        i=$((i + len))
+    done
+    (IFS=,; echo "${out[*]}")
+}
 # Cipher suite chosen in the ServerHello the client received
 server_hello_suite() {
     local b i
@@ -722,6 +785,51 @@ test_both_tls_negotiation_below_policy_is_rejected() {
 # Functional tests: classical server
 # ==============================================================================
 
+# dev01p256 matches dev01 in everything (CA, CN, authorize entry) except its
+# P-256 key. dev01 runs first as a control; the P-256 copy must then be
+# refused during the TLS handshake, before the admission policy is reached.
+test_both_client_signature_other_than_p384_is_rejected() {
+    local before i alert='Alert write:fatal'
+    eap dev01 client-device-01; expect_accept 10 client-device-01
+    before=$(server_log | grep -c "${alert}")
+    eap dev01p256 client-device-01; expect_reject
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "${alert}")" -gt "${before}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "${alert}") - before ))" "1" "one TLS handshake failure logged by the server"
+}
+
+# dev01sha256 matches dev01 in everything except the CA's signature on it,
+# made with SHA-256 instead of SHA-384. The signatures *on* certificates are
+# not covered by sigalgs_list (which governs handshake signatures); this
+# checks they are held to CNSA strength too.
+test_both_client_certificate_signed_with_sha256_is_rejected() {
+    local before i alert='Alert write:fatal'
+    eap dev01 client-device-01; expect_accept 10 client-device-01
+    before=$(server_log | grep -c "${alert}")
+    eap dev01sha256 client-device-01; expect_reject
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "${alert}")" -gt "${before}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "${alert}") - before ))" "1" "one TLS handshake failure logged by the server"
+}
+
+# In TLS 1.2 the signature algorithm fixes the hash, not the curve: a P-384
+# device willing to sign only with SHA-256 must be refused. (In TLS 1.3 a
+# P-384 key cannot sign with SHA-256 at all, so this case only exists here.)
+test_classical_client_signature_with_sha256_is_rejected() {
+    local before i alert='Alert write:fatal'
+    before=$(server_log | grep -c "${alert}")
+    eap dev01 client-device-01 --groups sigalgs-sha256; expect_reject
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "${alert}")" -gt "${before}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "${alert}") - before ))" "1" "one TLS handshake failure logged by the server"
+}
+
 test_classical_claimed_identity_must_equal_certificate_cn() {
     eap dev02 client-device-01; expect_reject
     eap dev02 anonymous; expect_reject
@@ -791,8 +899,33 @@ test_pqc_client_offering_tls12_and_tls13_gets_tls13() {
 }
 
 test_pqc_accepts_each_hybrid_group() {
-    eap dev01 anonymous --groups x25519mlkem768; expect_accept 10
-    eap dev01 anonymous --groups secp384r1mlkem1024; expect_accept 10
+    eap dev01 anonymous --groups x25519mlkem768
+    expect_eq "$(offered_groups)" "X25519MLKEM768" "client offered"
+    expect_accept 10
+    eap dev01 anonymous --groups secp384r1mlkem1024
+    expect_eq "$(offered_groups)" "SecP384r1MLKEM1024" "client offered"
+    expect_accept 10
+}
+
+# Each classical key exchange group offered on its own, P-384 included: it is
+# the one group a weakened configuration would most plausibly fall back to
+# (SUITEB192 in cipher_list, for one, replaces ecdh_curve with P-384). Each
+# rejection must be a failed TLS handshake, not a later refusal.
+test_pqc_every_classical_key_exchange_group_is_rejected() {
+    local group before rejected=0 i alert='Alert write:fatal'
+    before=$(server_log | grep -c "${alert}")
+    for group in "${CLASSICAL_GROUPS[@]}"; do
+        eap dev01 anonymous --groups "group-${group}"
+        expect_eq "$(offered_groups)" "${group}" "client offered"
+        expect_reject
+        rejected=$((rejected + 1))
+    done
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "${alert}")" -ge $((before + rejected)) ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "${alert}") - before ))" "${rejected}" \
+        "one TLS handshake failure logged by the server per rejected group"
 }
 
 # A realm in the (untrusted) outer identity must not change how the request

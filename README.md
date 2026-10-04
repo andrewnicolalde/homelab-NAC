@@ -109,8 +109,8 @@ This implementation strictly adheres to the **NSA CNSA 1.0 (Suite B 192-bit)** s
 
 | Cryptographic Domain | Standard / Implementation | Notes |
 | :--- | :--- | :--- |
-| **Asymmetric Curve** | **NIST P-384 (`secp384r1`)** | Enforced across all Root CAs, Server certificates, and Client keys. |
-| **Digital Signatures** | **ECDSA with SHA-384** | SHA-256 and RSA signatures are rejected. |
+| **Asymmetric Curve** | **NIST P-384 (`secp384r1`)** | Enforced across all Root CAs, Server certificates, and Client keys. Supplicants with keys on other curves (e.g. P-256) are rejected during the TLS handshake: in TLS 1.2 by `ecdh_curve`, which OpenSSL also checks client keys against. |
+| **Digital Signatures** | **ECDSA with SHA-384** | SHA-256 and RSA signatures are rejected: in the handshake by `sigalgs_list`, and on the supplicant's certificates by OpenSSL's 192-bit security level (`@SECLEVEL=4` in `cipher_list`), which also rejects keys weaker than P-384. |
 | **EAP Transport Security** | **TLS 1.2 (`ECDHE-ECDSA-AES256-GCM-SHA384`)** | Strict cipher suite enforcement; Perfect Forward Secrecy guaranteed. |
 | **Wi-Fi AKM Suite** | **IEEE 802.11 AKM 12 (`00:0f:ac:12`)** | `WPA (SHA384-SuiteB)` / WPA3-Enterprise 192-bit. |
 | **Data Frame Cipher** | **GCMP-256 (`00:0f:ac:9`)** | Both Pairwise and Group ciphers use Galois/Counter Mode 256-bit. |
@@ -315,7 +315,7 @@ A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside th
 | **TLS Version** | TLS 1.3 only (RFC 9190) |
 | **Key Exchange** | `SecP384r1MLKEM1024` (preferred) or `X25519MLKEM768` (hybrid ML-KEM); the server's order wins (`cipher_server_preference`) when a client sends key shares for both |
 | **Cipher Suite** | `TLS_AES_256_GCM_SHA384` only (`cipher_suites` in `config/eap`) |
-| **Authentication** | Unchanged: ECDSA P-384 certificates from the same PKI |
+| **Authentication** | Unchanged: ECDSA P-384 certificates from the same PKI; only `ecdsa_secp384r1_sha384` signatures are accepted (`sigalgs_list`), so keys on other curves are rejected |
 | **Outer Identity** | `anonymous` (Apple requires one for EAP-TLS 1.3); the device name is only sent inside the encrypted handshake |
 | **Admission & VLAN** | Shared fail-closed policy: `authorize` entries matched on the client certificate CN (`TLS-Client-Cert-Common-Name`), not on `User-Name`; certificates without an entry are rejected |
 | **NodePorts** | `31822/UDP` (auth), `31823/UDP` (acct), `32093/TCP` (RadSec) |

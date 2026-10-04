@@ -18,33 +18,225 @@ eap {
     # Common TLS Configuration
     # --------------------------------------------------------------------------
     tls-config tls-common {
-        # Server certificate and private key from Kubernetes Secret
+        # How these settings map onto the TLS handshake
+        # ----------------------------------------------------------------------
+        # In a TLS handshake the server and the supplicant agree on several
+        # things independently, and each is governed by its own setting:
+        #
+        #   protocol version ................... tls_min_version / tls_max_version
+        #   cipher suite (TLS 1.2: key exchange
+        #     method, server key type, record
+        #     encryption and key derivation) ... cipher_list
+        #   key exchange curve ................. ecdh_curve
+        #   handshake signature algorithm ...... sigalgs_list
+        #
+        # Each side also presents a certificate chain: the server's own
+        # (certificate_file), and the supplicant's, which must lead to ca_file.
+        # Across all of these, OpenSSL's security level (@SECLEVEL in
+        # cipher_list) sets a minimum strength. Settings made here apply to
+        # EAP-TLS only, not process-wide: other TLS listeners in this server
+        # (such as RadSec) state their own policy.
+
+        # --- Certificates and trust -------------------------------------------
+
+        # The server's own certificate (presented to every supplicant) and its private key.
+        # Both are contained in one PEM file from the freeradius-certs Secret.
         private_key_file = /etc/raddb/certs/server.pem
         certificate_file = /etc/raddb/certs/server.pem
 
-        # Trusted Root CA for validating client identity certificates
+        # The trust anchor for supplicants: a client certificate is accepted
+        # only if its chain leads to this CA (the user-device root CA).
+        # ca_path (a directory of CAs) is deliberately left unset, to avoid its
+        # directory permission checks. This is not necessary anyway, since we use only
+        # a single CA to issue client certificates.
         ca_file = /etc/raddb/certs/ca.pem
 
-        # NOTE: ca_path is intentionally omitted to avoid directory permission checks
-        
-        # Enforce WPA3-Enterprise 192-bit (CNSA / Suite B) cipher suite
-        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384"
-        cipher_server_preference = yes
+        # Require the identity the supplicant claims in the clear (the EAP
+        # identity, sent as User-Name) to equal its certificate CN, and reject
+        # the session if they do not match. Admission and VLAN come from the certificate CN alone
+        # (sites/check-eap-tls), so this is not what assigns VLANs; it stops a
+        # device from announcing one name while authenticating as another,
+        # which would mislead anything reading the RADIUS traffic or logs.
+        # TLS 1.3 supplicants that send an anonymous identity (as Apple
+        # devices do) cannot pass this check. However (for now), this classical server
+        # only supports supplicants connecting with TLS 1.2. We'll need to rework this if
+        # we switch this classical server over to TLS 1.3 (which I'd very much like to do.)
+        check_cert_cn = %{User-Name}
 
-        # Ephemeral ECDH curve (NIST P-384 / secp384r1)
-        ecdh_curve = "secp384r1"
+        # --- Protocol version -------------------------------------------------
 
-        # Supported TLS versions (capped at 1.2 per WPA3 192-bit CNSA specification)
+        # TLS 1.2 only. Two specifications apply, and they differ here:
+        #
+        #   CNSA 1.0 (NSA's Commercial National Security Algorithm suite) is a
+        #   list of algorithms and strengths: AES-256, ECDH and ECDSA on P-384,
+        #   SHA-384 (or RSA and DH of at least 3072 bits). It is not tied to
+        #   any protocol. Its profile for TLS (RFC 9151) covers both TLS 1.2
+        #   and TLS 1.3.
+        #
+        #   WPA3-Enterprise 192-bit mode (Wi-Fi Alliance) applies CNSA strength
+        #   to a whole Wi-Fi network. On the radio side it requires a SHA-384
+        #   based key management suite (AKM 00-0F-AC:12), GCMP-256 encryption
+        #   and protected management frames; the AP and the device enforce
+        #   these. On the EAP side it lists the permitted EAP-TLS cipher
+        #   suites, and that list names only TLS 1.2 suites (the one in
+        #   cipher_list below).
+        #
+        # The AP relays EAP and cannot see inside the TLS session, so the TLS
+        # rules can only be enforced by the two TLS endpoints: this server,
+        # and the supplicant if it chooses to (many don't). This server is the
+        # one place they are reliably enforced. It follows the WPA3 192-bit
+        # list; a TLS 1.3 profile per RFC 9151 would still be CNSA-compliant,
+        # but would depart from that list.
         tls_min_version = "1.2"
         tls_max_version = "1.2"
 
-        # Bind the claimed EAP identity to the verified client certificate:
-        # reject the session unless User-Name equals the certificate CN. VLANs
-        # are assigned from User-Name (mods-config/files/authorize), so without
-        # this any valid certificate could claim another device's VLAN.
-        check_cert_cn = %{User-Name}
+        # --- Cipher suite and security level ----------------------------------
 
-        # Explicitly disable session resumption caching to enforce full mutual re-authentication
+        # In TLS 1.2 one cipher suite fixes four separate things:
+        #   ECDHE      key exchange: ephemeral elliptic-curve Diffie-Hellman,
+        #              giving forward secrecy (the curve: ecdh_curve)
+        #   ECDSA      the key type of the SERVER's certificate (the curve again
+        #              comes from ecdh_curve)
+        #   AES256-GCM the authenticated encryption that protects the TLS records
+        #              after the handshake
+        #   SHA384     the hash inside TLS 1.2's PRF (pseudorandom function),
+        #              a key derivation function built from HMAC-SHA-384. The
+        #              PRF turns the ECDHE shared secret into the session keys,
+        #              computes the Finished messages that confirm both sides
+        #              derived the same keys, and derives the MSK sent to the
+        #              AP. It is NOT the hash used in signatures: neither the
+        #              handshake signatures (the server signing its ECDHE key,
+        #              the supplicant's CertificateVerify), which sigalgs_list
+        #              sets, nor the CA's signatures on certificates, which
+        #              the security level checks. All three are SHA-384 here,
+        #              but each is set independently.
+        # The above collectively satisfy the criteria of the WPA3 192-bit / CNSA
+        # suite, which is all we want to allow.
+        #
+        # @SECLEVEL=4 sets OpenSSL's 'security level': a minimum strength applied
+        # across the whole connection, i.e. keys and signatures in either
+        # side's certificate chain, the key exchange curve, the cipher and the
+        # handshake signatures. Level 4 means 192 bits. It is the only setting
+        # here that checks the signatures ON certificates: a supplicant
+        # certificate that its CA signed with SHA-256 is refused. It overlaps
+        # with ecdh_curve and sigalgs_list (it also refuses P-256 keys and
+        # SHA-256 handshake signatures), but allows stronger options that they
+        # exclude, such as P-521.
+        #
+        # FreeRADIUS has no configuration option of its own for the security
+        # level (there is no setting like "security_level = 4"). The only way
+        # to set it is through cipher_list, which FreeRADIUS hands unchanged to
+        # OpenSSL as a "cipher string". That string mixes two kinds of thing:
+        #   - cipher suite names, which choose the TLS 1.2 (and older) suites
+        #     allowed: here only the CNSA suite described above. They have no
+        #     effect on TLS 1.3, whose suites come from a separate setting
+        #     (cipher_suites). OpenSSL refuses a string that names no TLS 1.2
+        #     suite.
+        #   - commands, which set options for the whole TLS context, TLS 1.3
+        #     included. "@SECLEVEL=4" is one. A leading "SUITEB128" or
+        #     "SUITEB192" is another, and should not be used here: it switches
+        #     OpenSSL into Suite B mode, which discards the rest of the string,
+        #     "@SECLEVEL=4" included, and silently replaces ecdh_curve and
+        #     sigalgs_list with its own fixed lists. For this TLS 1.2 server
+        #     those happen to match the settings here, but this file would no
+        #     longer state the policy actually enforced, and losing the security
+        #     level would matter once the server moved to TLS 1.3.
+        # https://www.feistyduck.com/library/openssl-cookbook/online/openssl-command-line/understanding-security-levels.html
+        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:@SECLEVEL=4"
+
+        # When both sides support several options, use the server's order, not
+        # the supplicant's. With a single suite and a single curve there is
+        # nothing to choose today; this keeps the server in control if more
+        # are ever allowed.
+        cipher_server_preference = yes
+
+        # --- Key exchange curve -----------------------------------------------
+
+        # Despite its name, this is OpenSSL's list of allowed elliptic curves,
+        # and in TLS 1.2 it has two jobs, because TLS 1.2 uses one curve list
+        # for both of the following (RFC 8422):
+        #   1. the curve for the ephemeral ECDHE key exchange;
+        #   2. the curves allowed for the supplicant's certificates. OpenSSL
+        #      checks the supplicant's certificate key against this list, so a
+        #      device with a P-256 key is refused.
+        # Only NIST P-384 (secp384r1) is allowed. Adding a curve here would
+        # admit devices whose keys are on it, unless the security level
+        # refuses them.
+        ecdh_curve = "secp384r1"
+
+        # --- Handshake signatures ---------------------------------------------
+
+        # The signature algorithms permitted for the signatures made DURING the
+        # handshake: the server signing its ephemeral key with its private key,
+        # and the supplicant proving it holds the private key of its
+        # certificate (CertificateVerify). In TLS 1.2 a signature algorithm is
+        # only a (hash, algorithm) pair: the configured value translates to ECDSA with SHA-384,
+        # and does NOT fix the curve (ecdh_curve does that). It *refuses*, for
+        # example, RSA, and ECDSA with SHA-256. This setting does not cover the
+        # signatures ON certificates, made by a CA when it issued them (see the
+        # security level above).
+        sigalgs_list = "ecdsa_secp384r1_sha384"
+
+        # --- Session resumption -----------------------------------------------
+
+        # Resumption lets a returning supplicant skip the full handshake by
+        # reusing secrets from an earlier session. It is disabled, so every
+        # EAP authentication is a full handshake. What that does and doesn't
+        # change in FreeRADIUS 3.2.10 (tested in a lab with resumption on):
+        #   - The admission policy runs either way. On a resumed TLS 1.2
+        #     session FreeRADIUS restores the certificate attributes it cached
+        #     (CN, serial, issuer, expiry) and runs check-eap-tls again, so a
+        #     device removed from the authorize list is refused even when
+        #     resuming (and, with a persist_dir cache, so is a certificate
+        #     that has expired since). What only a full handshake does is
+        #     verify the certificate chain against ca_file, and run
+        #     check_cert_cn above.
+        #   - If the cache stores the VLAN attributes (the store list below),
+        #     a resumed Access-Accept carries the VLAN twice: the one
+        #     check-eap-tls has just looked up, then the cached one. After a
+        #     VLAN change the two disagree (e.g. "40" then the stale "30").
+        #   - Over TLS 1.3, resumption doesn't work at all with this policy:
+        #     FreeRADIUS 3.2.10 restores the cached certificate attributes
+        #     too early, and they are gone by the time check-eap-tls runs, so
+        #     every resumed authentication is rejected (cn=""). Keep that in
+        #     mind if this server moves to TLS 1.3.
+        #   - The supplicant proves every time that it holds its certificate's
+        #     private key (CertificateVerify). On resumption it proves only
+        #     that it knows the cached session secret, which software on the
+        #     device holds and which could be copied off it. This protects
+        #     against an attacker who copies that secret and then loses
+        #     access to the device: without resumption, the copy is useless.
+        #     Of course, it doesn't mean much if an attacker has persistence
+        #     on the device, since they can just keep stealing each new
+        #     session secret, nor does it mean much while client certificate
+        #     private keys are also accessible from software (which ours are
+        #     for now, since they're not generated on the Secure Enclave
+        #     (yet)). Once they are, malicious software could still use the
+        #     Secure Enclave as an oracle to complete new handshakes, but only
+        #     for as long as it keeps access to the device. Alas.
+        #   - Forward secrecy for every session. TLS 1.2 resumption makes no
+        #     new ECDHE exchange: the resumed session's keys and the MSK sent
+        #     to the AP are derived from the earlier session's master secret
+        #     plus fresh random values. To resume at all, FreeRADIUS 3.2.10
+        #     must write each session, master secret included, to disk
+        #     (persist_dir) or hand it to a cache virtual server; it never
+        #     issues stateless session tickets. Anyone who later obtains a
+        #     stored session could decrypt the original session and every
+        #     resumed one they recorded, and derive their Wi-Fi keys. A full
+        #     handshake makes a new ECDHE key pair each time and discards it
+        #     afterwards, so no stored secret can unlock a past session.
+        # For what it's worth, each of these benefits is fairly niche on its
+        # own (the admission policy, which would have been the big one, runs
+        # on resumed sessions anyway). Together, though, they're enough to
+        # keep resumption off: the only cost is a full handshake for every
+        # authentication.
+        #
+        # This applies to EAP authentications, not to every Wi-Fi association.
+        # The Wi-Fi layer has its own resumption: an AP may cache the PMK
+        # (PMKSA caching) and let a device reconnect without contacting this
+        # server at all. That cache's lifetime on the AP, and any
+        # Session-Timeout sent in the Access-Accept, limit how long a device
+        # removed from the authorize list can stay connected.
         cache {
             enable = no
             # lifetime = 24 # hours

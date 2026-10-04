@@ -99,18 +99,26 @@ PRIVATE_CONFIG_DIR=../homelab-network-private ./test/guarantees.sh --static
 
 The exit status is the number of failed tests. Set `RADIUS_IMAGE` if the pinned digest is not available locally.
 
-The post-quantum server's TLS 1.3 cipher-suite tests offer each suite on its own, plus all of them at once. Each case first decodes the client's own ClientHello, to prove it offered what the case claims. Accepted sessions are checked from both ends: the client's view comes from the ServerHello it received, the server's from its `cert_log` line. A rejection only counts if the server logged a failed TLS handshake, so a refusal for some unrelated reason can't pass as one.
+The post-quantum server's TLS 1.3 cipher-suite tests offer each suite on its own, plus all of them at once. Its key exchange tests likewise offer each hybrid group, and each classical group (X25519, X448, P-256, P-384, P-521), on its own; the classical ones must all be refused. Each case first decodes the client's own ClientHello (its cipher suites or supported groups), to prove it offered what the case claims. Accepted sessions are checked from both ends: the client's view comes from the ServerHello it received, the server's from its `cert_log` line. A rejection only counts if the server logged a failed TLS handshake, so a refusal for some unrelated reason can't pass as one.
 
 ### Mutation Check (`mutation-check.sh`)
 
-A passing test only means something if it fails when the setting it guards is broken. `mutation-check.sh` copies the repository to a temporary directory and deliberately weakens one setting in the copy's `k8s-pqc/config/eap` at a time: it removes or widens `cipher_suites`, prefers AES-128, or allows TLS 1.2. It then checks that the tests guarding that setting fail. The working tree is never modified.
+A passing test only means something if it fails when the setting it guards is broken. `mutation-check.sh` copies the repository to a temporary directory and deliberately weakens one setting in the copy's `eap` configuration at a time: it removes or widens `cipher_suites`, prefers AES-128, allows TLS 1.2, removes `sigalgs_list` or `@SECLEVEL=4`, adds P-256 to the classical server's `ecdh_curve`, or puts OpenSSL's `SUITEB192` keyword at the start of the PQC server's `cipher_list` (which replaces its hybrid groups with classical P-384 and discards `@SECLEVEL=4`). It then checks that the tests guarding that setting fail. The working tree is never modified.
 
 ```bash
 ./test/mutation-check.sh                  # every mutation, a few minutes
 ./test/mutation-check.sh --only cipher    # mutations whose name matches a regex
 ```
 
-One mutation is expected *not* to change behaviour. On its own, `tls_min_version = "1.2"` still lets no TLS 1.2 client in: the hybrid ML-KEM groups exist only in TLS 1.3, so a TLS 1.2 client shares no key-exchange group with the server. The script checks that the TLS 1.2 test still passes there, and that it fails once a classical group is added as well. The static tests pin `tls_min_version` itself.
+Some properties are enforced by two settings at once. Weakening one of them must then *not* change behaviour: the script checks that the guarding test still passes, and that it fails once the other control is weakened too. The static tests pin each setting itself.
+
+| Property | Enforced by |
+|---|---|
+| PQC server refuses TLS 1.2 | `tls_min_version = "1.3"`, and the hybrid ML-KEM groups, which exist only in TLS 1.3 |
+| PQC server refuses TLS 1.3 AES-128 suites | `cipher_suites`, and `@SECLEVEL=4` (AES-128 offers 128 bits). ChaCha20 (256-bit key) passes level 4, so `cipher_suites` alone excludes it |
+| Devices with keys on other curves (P-256) are refused | `@SECLEVEL=4` on both servers, plus `sigalgs_list` on the PQC server (TLS 1.3 signature schemes name the curve) and `ecdh_curve = "secp384r1"` on the classical server (TLS 1.2 checks certificate keys against the group list; its signature algorithms don't name the curve) |
+| ECDSA signatures with SHA-256 in a TLS 1.2 handshake are refused | `sigalgs_list` and `@SECLEVEL=4` |
+| Certificates signed with SHA-256 are refused | `@SECLEVEL=4` only: `sigalgs_list` governs the signatures made in the handshake, not those on certificates |
 
 ---
 
