@@ -14,8 +14,8 @@
 #                   Functional: run against one server only.
 #
 # The functional lab runs the pinned FreeRADIUS image with the repository's
-# own eap, check-eap-tls, cert_vlan, cert_log, clients.conf.example and
-# openssl.cnf, the radiusd arguments from the Deployment, and a throwaway
+# own eap, check-eap-tls, cert_vlan, cert_log and clients.conf.example,
+# the radiusd arguments from the Deployment, and a throwaway
 # PKI generated per run. Lab authorize: client-device-01 -> VLAN 10,
 # client-device-02 -> VLAN 30.
 #
@@ -56,7 +56,6 @@ done
 # Repository files under test
 EAP_CLASSICAL="${REPO}/k8s/config/eap"
 EAP_PQC="${REPO}/k8s-pqc/config/eap"
-OPENSSL_PQC="${REPO}/k8s-pqc/config/openssl.cnf"
 CHECK_EAP_TLS="${REPO}/k8s/config/check-eap-tls"
 RADIUSD_CONF="${REPO}/k8s/config/radiusd.conf"
 KUSTOMIZE_BASE="${REPO}/k8s/kustomization.yaml"
@@ -66,6 +65,9 @@ CERT_LOG="${REPO}/k8s/config/cert_log"
 DEPLOY_CLASSICAL="${REPO}/k8s/01-deployment-test.yaml"
 DEPLOY_PQC="${REPO}/k8s-pqc/01-deployment-pqc.yaml"
 DOCKERFILE="${REPO}/docker/Dockerfile"
+# Every TLS 1.3 cipher suite (RFC 8446 and OpenSSL)
+TLS13_SUITES=(TLS_AES_256_GCM_SHA384 TLS_AES_128_GCM_SHA256 TLS_CHACHA20_POLY1305_SHA256
+              TLS_AES_128_CCM_SHA256 TLS_AES_128_CCM_8_SHA256)
 CLIENTS_FILES=("${REPO}/k8s/config/clients.conf.example")
 AUTHORIZE_FILES=("${REPO}/k8s/config/authorize.example")
 OVERLAY_FILES=("${REPO}/examples/private-overlay/kustomization.yaml.example")
@@ -227,11 +229,12 @@ test_static_classical_tls_policy_is_cnsa_suite_b() {
     expect_eq "$(echo "${body}" | conf_value ecdh_curve)" "secp384r1" "classical ecdh_curve"
 }
 
-test_static_pqc_tls_policy_allows_only_tls13_hybrid_groups() {
+test_static_pqc_tls_policy_allows_only_tls13_aes256_and_hybrid_groups() {
     local body curves g
     body=$(section_body "${EAP_PQC}" "tls-config tls-common")
     expect_eq "$(echo "${body}" | conf_value tls_min_version)" "1.3" "PQ tls_min_version"
     expect_eq "$(echo "${body}" | conf_value tls_max_version)" "1.3" "PQ tls_max_version"
+    expect_eq "$(echo "${body}" | conf_value cipher_suites)" "TLS_AES_256_GCM_SHA384" "PQ cipher_suites"
     curves=$(echo "${body}" | conf_value ecdh_curve)
     [ -n "${curves}" ] || fail "PQ ecdh_curve must be set"
     for g in $(echo "${curves}" | tr ':' ' '); do
@@ -239,22 +242,14 @@ test_static_pqc_tls_policy_allows_only_tls13_hybrid_groups() {
     done
 }
 
-test_static_pqc_openssl_config_pins_version_suite_and_groups() {
-    local g
-    expect_match "${OPENSSL_PQC}" '^MinProtocol = TLSv1\.3$' "openssl.cnf MinProtocol must be TLSv1.3"
-    expect_match "${OPENSSL_PQC}" '^MaxProtocol = TLSv1\.3$' "openssl.cnf MaxProtocol must be TLSv1.3"
-    expect_match "${OPENSSL_PQC}" '^Ciphersuites = TLS_AES_256_GCM_SHA384$' "openssl.cnf must pin TLS_AES_256_GCM_SHA384 only"
-    for g in $(sed -nE 's/^Groups = (.*)$/\1/p' "${OPENSSL_PQC}" | tr ':' ' '); do
-        [[ "${g}" == *MLKEM* ]] || fail "openssl.cnf Groups contains non-hybrid group ${g}"
+# OPENSSL_CONF would apply one TLS policy to every TLS connection in the
+# process, overriding settings left out of each FreeRADIUS TLS section (and so
+# also the future RadSec listener). Each section states its own policy instead.
+test_static_no_deployment_sets_a_process_wide_openssl_config() {
+    local f
+    for f in "${DEPLOY_CLASSICAL}" "${DEPLOY_PQC}"; do
+        grep -q OPENSSL_CONF "${f}" && fail "$(basename "${f}") must not set OPENSSL_CONF"
     done
-}
-
-test_static_pqc_deployment_loads_the_pinned_openssl_config() {
-    local env_path
-    env_path=$(awk '/name: OPENSSL_CONF/ {getline; sub(/.*value: */, ""); gsub(/"/, ""); print}' "${DEPLOY_PQC}")
-    [ -n "${env_path}" ] || fail "PQ Deployment must set OPENSSL_CONF"
-    grep -Eq "mountPath: ${env_path}\$" "${DEPLOY_PQC}" || fail "OPENSSL_CONF (${env_path}) must point at a mounted file"
-    grep -q OPENSSL_CONF "${DEPLOY_CLASSICAL}" && fail "classical Deployment must not load the PQ OpenSSL config"
 }
 
 test_static_session_resumption_is_disabled_on_both_servers() {
@@ -330,10 +325,10 @@ test_static_containers_run_unprivileged() {
 test_static_images_are_pinned_by_digest() {
     local f
     for f in "${DEPLOY_CLASSICAL}" "${DEPLOY_PQC}"; do
-        expect_match "$f" 'image: [^ ]+@sha256:[0-9a-f]{64}$' "image must be pinned by digest"
+        expect_match "$f" 'image: [^ ]+@sha256:[0-9a-f]{64}( +#.*)?$' "image must be pinned by digest"
     done
-    expect_eq "$(sed -nE 's/^ +image: +(.+)$/\1/p' "${DEPLOY_CLASSICAL}")" \
-              "$(sed -nE 's/^ +image: +(.+)$/\1/p' "${DEPLOY_PQC}")" "both servers must run the same image"
+    expect_eq "$(sed -nE 's/^ +image: +([^ #]+).*$/\1/p' "${DEPLOY_CLASSICAL}")" \
+              "$(sed -nE 's/^ +image: +([^ #]+).*$/\1/p' "${DEPLOY_PQC}")" "both servers must run the same image"
 }
 
 test_static_secrets_and_keys_are_mounted_read_only_and_not_world_readable() {
@@ -416,7 +411,7 @@ lab_setup() {
     elif command -v docker >/dev/null 2>&1; then CLI=docker
     else echo "❌ podman or docker is required for the functional tests (use --static)" >&2; exit 1; fi
 
-    RADIUS_IMAGE="${RADIUS_IMAGE:-$(sed -nE 's/^ +image: +(.+)$/\1/p' "${DEPLOY_CLASSICAL}" | head -n1)}"
+    RADIUS_IMAGE="${RADIUS_IMAGE:-$(sed -nE 's/^ +image: +([^ #]+).*$/\1/p' "${DEPLOY_CLASSICAL}" | head -n1)}"
     EAPOL_IMAGE="${EAPOL_IMAGE:-eapol-test:pqc}"
     local img
     for img in "${RADIUS_IMAGE}" "${EAPOL_IMAGE}"; do
@@ -475,6 +470,16 @@ EOF
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "X25519MLKEM768" > "${WORK}/conf/cl-x25519mlkem768.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "SecP384r1MLKEM1024" > "${WORK}/conf/cl-secp384r1mlkem1024.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nCiphersuites = %s\n' "TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256" > "${WORK}/conf/cl-aes128.cnf"
+    # One client configuration per TLS 1.3 cipher suite, and one offering all.
+    # Security level 0, or the client's OpenSSL silently drops
+    # TLS_AES_128_CCM_8_SHA256; the server's policy alone must decide.
+    local suite offer
+    for suite in "${TLS13_SUITES[@]}" all; do
+        offer=${suite}
+        [ "${suite}" = all ] && offer=$(IFS=:; echo "${TLS13_SUITES[*]}")
+        printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nCipherString = DEFAULT:@SECLEVEL=0\nCiphersuites = %s\n' "${offer}" \
+            > "${WORK}/conf/cl-suite-${suite}.cnf"
+    done
     chmod 644 "${WORK}/conf/"*
 
     ${CLI} network create --subnet 10.1.0.0/24 "${NET}" >/dev/null
@@ -487,11 +492,8 @@ lab_teardown() {
 }
 
 start_server() { # classical|pqc
-    local eap=${EAP_CLASSICAL} extra=()
-    if [ "$1" = pqc ]; then
-        eap=${EAP_PQC}
-        extra=(-v "${OPENSSL_PQC}:/etc/raddb/openssl-pqc.cnf:ro" -e OPENSSL_CONF=/etc/raddb/openssl-pqc.cnf)
-    fi
+    local eap=${EAP_CLASSICAL}
+    [ "$1" = pqc ] && eap=${EAP_PQC}
     ${CLI} rm -f "${SRV}" >/dev/null 2>&1
     ${CLI} run -d --name "${SRV}" --network "${NET}" --ip "${SRV_IP}" \
         -e RADIUS_SECRET_AUTHENTICATORS="${AUTH_SECRET}" -e RADIUS_SECRET_TEST="${TEST_SECRET}" \
@@ -504,7 +506,7 @@ start_server() { # classical|pqc
         -v "${CHECK_EAP_TLS}:/etc/raddb/sites-enabled/check-eap-tls:ro" \
         -v "${CERT_VLAN}:/etc/raddb/mods-enabled/cert_vlan:ro" \
         -v "${CERT_LOG}:/etc/raddb/mods-enabled/cert_log:ro" \
-        ${extra[@]+"${extra[@]}"} "${RADIUS_IMAGE}" "${RADIUSD_ARGS[@]}" >/dev/null
+        "${RADIUS_IMAGE}" "${RADIUSD_ARGS[@]}" >/dev/null
     local i
     for i in $(seq 60); do
         server_log | grep -c "Ready to process requests" >/dev/null && { EAP_SUCCESSES=0; return 0; }
@@ -520,7 +522,7 @@ server_log() { local log; log=$(${CLI} logs "${SRV}" 2>&1); printf '%s\n' "${log
 
 # ------------------------------------------------------------------------------
 # eap <cert|none> <identity> [options]: one EAP authentication
-#   --tls tls12|tls13|weak|peap|ttls  (default: the server's own TLS version)
+#   --tls tls12|tls13|tls12or13|weak|peap|ttls  (default: the server's own TLS version)
 #   --groups <client config name>     client OpenSSL configuration (cl-<name>.cnf)
 #   --secret <secret>                 shared secret (default: the lab secret)
 #   --reauth                          authenticate twice in one run
@@ -549,6 +551,7 @@ eap() {
         tls12) phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_3=1"; ciphers="ECDHE-ECDSA-AES256-GCM-SHA384" ;;
         weak)  phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_3=1"; ciphers="ECDHE-ECDSA-AES128-GCM-SHA256" ;;
         tls13) phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0" ;;
+        tls12or13) phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=0 tls_disable_tlsv1_3=0" ;;
         peap)  method=PEAP ;;
         ttls)  method=TTLS ;;
     esac
@@ -599,6 +602,52 @@ expect_accept() { # vlan [cn]
 expect_reject() {
     expect_eq "${EAP_RESULT}" "FAILURE" "authentication result"
     expect_eq "${EAP_VLANS}" "" "no Access-Accept"
+}
+
+# ------------------------------------------------------------------------------
+# What the last eap run offered and negotiated, read from the raw handshake
+# messages in the client's log and from the server's admission log
+# ------------------------------------------------------------------------------
+# Hex bytes of the first handshake message whose log line matches $1
+hello_bytes() {
+    awk -v pat="$1" '$0 ~ pat {getline; sub(/.*hexdump\(len=[0-9]+\): /, ""); print; exit}' "${EAP_OUT}"
+}
+suite_name() {
+    case "$1" in
+        1301) echo TLS_AES_128_GCM_SHA256 ;;       1302) echo TLS_AES_256_GCM_SHA384 ;;
+        1303) echo TLS_CHACHA20_POLY1305_SHA256 ;; 1304) echo TLS_AES_128_CCM_SHA256 ;;
+        1305) echo TLS_AES_128_CCM_8_SHA256 ;;     *) echo "0x$1" ;;
+    esac
+}
+# TLS 1.3 cipher suites in the client's ClientHello, comma-separated
+offered_tls13_suites() {
+    local b i n c out=()
+    read -r -a b <<< "$(hello_bytes 'TX ver=.*\(handshake/client hello\)')"
+    [ ${#b[@]} -gt 40 ] || return 0
+    i=$((39 + 16#${b[38]}))    # skip type, length, version, random and session ID
+    n=$(( (16#${b[i]} * 256 + 16#${b[i+1]}) / 2 )); i=$((i + 2))
+    for (( ; n > 0; n--, i += 2 )); do
+        c="${b[i]}${b[i+1]}"
+        [[ "${c}" == 13* ]] && out+=("$(suite_name "${c}")")
+    done
+    (IFS=,; echo "${out[*]}")
+}
+# Cipher suite chosen in the ServerHello the client received
+server_hello_suite() {
+    local b i
+    read -r -a b <<< "$(hello_bytes 'RX ver=.*\(handshake/server hello\)')"
+    [ ${#b[@]} -gt 40 ] || return 0
+    i=$((39 + 16#${b[38]}))
+    suite_name "${b[i]}${b[i+1]}"
+}
+expect_negotiated() { # version suite: as seen by the client and by the server
+    local line
+    line=$(server_log | grep 'EAP-TLS admitted' | tail -n1)
+    expect_eq "$(grep 'SSL: Using TLS version' "${EAP_OUT}" | tail -n1 | awk '{print $NF}')" "TLSv${1#TLS }" \
+        "client: negotiated TLS version"
+    expect_eq "$(server_hello_suite)" "$2" "client: cipher suite in the ServerHello"
+    expect_eq "$(echo "${line}" | sed -nE 's/.* tls="([^"]*)".*/\1/p')" "$1" "server: TLS version in cert_log"
+    expect_eq "$(echo "${line}" | sed -nE 's/.* cipher=([^ ]*).*/\1/p')" "$2" "server: cipher suite in cert_log"
 }
 
 # ==============================================================================
@@ -694,6 +743,51 @@ test_pqc_vlan_comes_from_certificate_not_claimed_identity() {
 
 test_pqc_tls12_is_rejected() {
     eap dev01 anonymous --tls tls12; expect_reject
+}
+
+# Each TLS 1.3 cipher suite offered on its own. Every case first checks the
+# client's ClientHello, so it provably offered what the case claims; accepted
+# sessions are checked from both ends, and rejections must be for the cipher
+# suite, not for some unrelated reason.
+test_pqc_aes256_offered_alone_is_accepted_and_used() {
+    eap dev01 anonymous --groups suite-TLS_AES_256_GCM_SHA384
+    expect_eq "$(offered_tls13_suites)" "TLS_AES_256_GCM_SHA384" "client offered"
+    expect_accept 10
+    expect_negotiated "TLS 1.3" TLS_AES_256_GCM_SHA384
+}
+
+test_pqc_every_other_tls13_cipher_suite_is_rejected() {
+    local suite before rejected=0 i alert='Alert write:fatal:handshake failure'
+    before=$(server_log | grep -c "${alert}")
+    for suite in "${TLS13_SUITES[@]}"; do
+        [ "${suite}" = TLS_AES_256_GCM_SHA384 ] && continue
+        eap dev01 anonymous --groups "suite-${suite}"
+        expect_eq "$(offered_tls13_suites)" "${suite}" "client offered"
+        expect_reject
+        rejected=$((rejected + 1))
+    done
+    # Each rejection must be a failed TLS handshake (no cipher suite in common),
+    # not a later refusal by the admission policy. radiusd's own log lines can
+    # arrive late, so wait briefly for them.
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "${alert}")" -ge $((before + rejected)) ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "${alert}") - before ))" "${rejected}" \
+        "one TLS handshake failure logged by the server per rejected suite"
+}
+
+test_pqc_client_offering_every_cipher_suite_gets_aes256() {
+    eap dev01 anonymous --groups suite-all
+    expect_eq "$(offered_tls13_suites)" "$(IFS=,; echo "${TLS13_SUITES[*]}")" "client offered"
+    expect_accept 10
+    expect_negotiated "TLS 1.3" TLS_AES_256_GCM_SHA384
+}
+
+test_pqc_client_offering_tls12_and_tls13_gets_tls13() {
+    eap dev01 anonymous --tls tls12or13
+    expect_accept 10
+    expect_negotiated "TLS 1.3" TLS_AES_256_GCM_SHA384
 }
 
 test_pqc_accepts_each_hybrid_group() {

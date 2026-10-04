@@ -86,8 +86,7 @@ homelab-NAC/
 │   ├── 02-service-pqc.yaml                 # NodePort service exposing 31822, 31823, 32093
 │   ├── kustomization.yaml                  # Generates the PQ-specific ConfigMap
 │   └── config/
-│       ├── eap                             # EAP-TLS 1.3, hybrid ML-KEM groups only
-│       └── openssl.cnf                     # Pins TLS 1.3 ciphersuite via OPENSSL_CONF
+│       └── eap                             # EAP-TLS 1.3, AES-256-GCM, hybrid ML-KEM groups only
 ├── examples/private-overlay/               # Decoupled Private Overlay Template
 │   ├── README.md                           # Guide for private overlay architecture
 │   ├── certs.env.example                   # Site parameter template (SANs, identities)
@@ -315,7 +314,7 @@ A second, independent FreeRADIUS deployment (`freeradius-pqc`) runs alongside th
 | :--- | :--- |
 | **TLS Version** | TLS 1.3 only (RFC 9190) |
 | **Key Exchange** | `SecP384r1MLKEM1024` (preferred) or `X25519MLKEM768` (hybrid ML-KEM); the server's order wins (`cipher_server_preference`) when a client sends key shares for both |
-| **Cipher Suite** | `TLS_AES_256_GCM_SHA384` (pinned via `OPENSSL_CONF`; FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite option) |
+| **Cipher Suite** | `TLS_AES_256_GCM_SHA384` only (`cipher_suites` in `config/eap`) |
 | **Authentication** | Unchanged: ECDSA P-384 certificates from the same PKI |
 | **Outer Identity** | `anonymous` (Apple requires one for EAP-TLS 1.3); the device name is only sent inside the encrypted handshake |
 | **Admission & VLAN** | Shared fail-closed policy: `authorize` entries matched on the client certificate CN (`TLS-Client-Cert-Common-Name`), not on `User-Name`; certificates without an entry are rejected |
@@ -410,10 +409,11 @@ Technical details and implementation notes are documented in [`notes/client_hard
 * [x] **YubiKey Hardware Root of Trust:** 3-CA architecture using YubiKey PIV with `ECCP384` and `TOUCH_POLICY_ALWAYS`.
 * [x] **DNS FQDN Server SANs:** Compliant with modern 802.1X supplicant validation standards.
 * [x] **Automated macOS PBES1 PKCS#12 Packaging:** Turnkey client onboarding with automated trust chain bundling.
-* [ ] **Software Mode in `generate-certificate-authorities.sh`:** Add standalone disk-backed 3-CA generation and rotation to `generate-certificate-authorities.sh` (bringing standalone CA initialization parity to software mode).
-* [ ] **Scoped `.mobileconfig` Profiles:** Scoping Root CA trust exclusively to `ENTERPRISE-WIFI` via Apple Configuration Profile payloads (`PayloadCertificateAnchorUUID` and `TLSTrustedServerNames`), preventing web/HTTPS MITM exposure.
+* [x] **Software Mode in `generate-certificate-authorities.sh`:** Add standalone disk-backed 3-CA generation and rotation to `generate-certificate-authorities.sh` (bringing standalone CA initialization parity to software mode).
+* [x] **Scoped `.mobileconfig` Profiles:** Scoping Root CA trust exclusively to `ENTERPRISE-WIFI` via Apple Configuration Profile payloads (`PayloadCertificateAnchorUUID` and `TLSTrustedServerNames`), preventing web/HTTPS MITM exposure.
 * [ ] **Hardware-Backed Client Keys:** Generating client keys inside Apple Secure Enclave (`kSecAttrTokenIDSecureEnclave` / P-256) or YubiKey PIV Smart Card (P-384).
 * [ ] **RADIUS Dynamic Authorization / CoA (RFC 3576):** Change of Authorization disconnect messages for immediate session termination.
+* [ ] **RADSEC:** RADIUS over TLS, so that RADIUS traffic between my authenticators (APs, switches) and my RADIUS servers is not sent in the clear. `Access-Accept` messages sent by the RADIUS server to APs contain the Master Session Key material that the AP uses to derive the keys used to protect traffic over the air.
 
 ---
 

@@ -86,7 +86,7 @@ You can override target parameters via positional arguments:
 | `test_image_*` | The stock configuration inside the pinned FreeRADIUS image | podman or docker |
 | `test_both_*`, `test_classical_*`, `test_pqc_*` | Real authentications against each server in a disposable lab: registered, unregistered, expired, untrusted-CA and missing certificates; identity binding; TLS version, group and suite policy; password-based methods; wrong shared secret; re-authentication; and afterwards, that the log has one line per admission and no keys or secrets | podman or docker, the `eapol-test:pqc` image |
 
-The lab uses the Deployment's pinned image and `radiusd` arguments with the repository's own `eap`, `check-eap-tls`, `cert_vlan`, `cert_log`, `clients.conf.example` and `openssl.cnf`, and a throwaway PKI generated for each run. Nothing real is used.
+The lab uses the Deployment's pinned image and `radiusd` arguments with the repository's own `eap`, `check-eap-tls`, `cert_vlan`, `cert_log` and `clients.conf.example`, and a throwaway PKI generated for each run. Nothing real is used.
 
 ```bash
 ./test/guarantees.sh --static        # configuration only, in seconds
@@ -98,6 +98,19 @@ PRIVATE_CONFIG_DIR=../homelab-network-private ./test/guarantees.sh --static
 ```
 
 The exit status is the number of failed tests. Set `RADIUS_IMAGE` if the pinned digest is not available locally.
+
+The post-quantum server's TLS 1.3 cipher-suite tests offer each suite on its own, plus all of them at once. Each case first decodes the client's own ClientHello, to prove it offered what the case claims. Accepted sessions are checked from both ends: the client's view comes from the ServerHello it received, the server's from its `cert_log` line. A rejection only counts if the server logged a failed TLS handshake, so a refusal for some unrelated reason can't pass as one.
+
+### Mutation Check (`mutation-check.sh`)
+
+A passing test only means something if it fails when the setting it guards is broken. `mutation-check.sh` copies the repository to a temporary directory and deliberately weakens one setting in the copy's `k8s-pqc/config/eap` at a time: it removes or widens `cipher_suites`, prefers AES-128, or allows TLS 1.2. It then checks that the tests guarding that setting fail. The working tree is never modified.
+
+```bash
+./test/mutation-check.sh                  # every mutation, a few minutes
+./test/mutation-check.sh --only cipher    # mutations whose name matches a regex
+```
+
+One mutation is expected *not* to change behaviour. On its own, `tls_min_version = "1.2"` still lets no TLS 1.2 client in: the hybrid ML-KEM groups exist only in TLS 1.3, so a TLS 1.2 client shares no key-exchange group with the server. The script checks that the TLS 1.2 test still passes there, and that it fails once a classical group is added as well. The static tests pin `tls_min_version` itself.
 
 ---
 

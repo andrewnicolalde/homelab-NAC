@@ -17,4 +17,3 @@ configMapGenerator:
   - name: freeradius-pqc-config
     files:
       - eap=./config/eap
-      - openssl.cnf=./config/openssl.cnf

@@ -51,12 +51,16 @@ eap {
         # acceptable key share is already present.
         cipher_server_preference = yes
 
-        # TLS 1.3 only (RFC 9190 EAP-TLS 1.3). There is no cipher_list, which only
-        # governs TLS <= 1.2. FreeRADIUS 3.0.x has no TLS 1.3 ciphersuite
-        # option, so the suite is pinned to TLS_AES_256_GCM_SHA384 via
-        # OPENSSL_CONF (see openssl.cnf).
+        # TLS 1.3 only (RFC 9190 EAP-TLS 1.3)
         tls_min_version = "1.3"
         tls_max_version = "1.3"
+
+        # The only TLS 1.3 cipher suite offered: AES-256-GCM with SHA-384.
+        # Supplicants offering only AES-128-GCM or ChaCha20 are rejected during
+        # the handshake. (cipher_list is not used: it only governs TLS <= 1.2.)
+        # This applies to EAP-TLS alone, not process-wide, so other TLS
+        # listeners in this server (such as RadSec) set their own policy.
+        cipher_suites = "TLS_AES_256_GCM_SHA384"
 
         # Explicitly disable session resumption caching to enforce full mutual re-authentication.
         # VLAN assignment (sites/check-eap-tls) has only been verified for full
