@@ -36,6 +36,13 @@ clients radsec {
         ipaddr = 10.1.0.0/24
         proto = tls
         secret = radsec
+        # No require_message_authenticator here, deliberately: FreeRADIUS
+        # never checks Message-Authenticator on packets received over
+        # RadSec, whatever this client or the global setting says. TLS 1.3
+        # already authenticates every packet, and an HMAC keyed with the
+        # public secret "radsec" would add nothing. The attribute defends
+        # plain UDP RADIUS against forged packets (BlastRADIUS,
+        # CVE-2024-3596), which cannot happen inside TLS.
         nas_type = other
     }
 }
