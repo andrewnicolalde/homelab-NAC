@@ -7,15 +7,7 @@
 # Defines trusted Network Access Servers (NAS) / Authenticators (APs, Switches)
 # ==============================================================================
 
-# 1. Localhost (for local diagnostic testing with radtest / eapol_test)
-client localhost {
-    ipaddr = 127.0.0.1
-    secret = 'CHANGE_ME_LOCAL_TEST_SECRET'
-    require_message_authenticator = no
-    nas_type = other
-}
-
-# 2. Network Authenticators (APs and Switches)
+# 1. Network Authenticators (APs and Switches)
 # The secret (RADIUS_SECRET_AUTHENTICATORS) MUST match the RADIUS Secret entered in
 # your AP/switch RADIUS Profile.
 client network_authenticators {
@@ -25,7 +17,7 @@ client network_authenticators {
     nas_type = other
 }
 
-# 2b. The same authenticators over RadSec (TCP 2083, sites-enabled/radsec).
+# 1b. The same authenticators over RadSec (TCP 2083, sites-enabled/radsec).
 # Only the RadSec listener reads this list ('clients = radsec'); the UDP
 # listeners use the clients above. The address must match the AP's real
 # source address, which the Service preserves (externalTrafficPolicy: Local).
@@ -47,7 +39,7 @@ clients radsec {
     }
 }
 
-# 3. Test Runner / Management Subnet (for testing EAP-TLS directly via eapol_test)
+# 2. Test Runner / Management Subnet (for testing EAP-TLS directly via eapol_test)
 client workstation_test {
     ipaddr = 10.10.10.0/24
     secret = $ENV{RADIUS_SECRET_TEST}

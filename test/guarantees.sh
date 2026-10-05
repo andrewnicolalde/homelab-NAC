@@ -290,7 +290,7 @@ test_static_network_clients_require_message_authenticator() {
     local f
     for f in "${CLIENTS_FILES[@]}"; do
         awk '/^client / {name = $2; ma = ""} /require_message_authenticator/ {ma = $3}
-             /^}/ && name != "" { if (name != "localhost" && ma != "yes") print name; name = "" }' "$f" \
+             /^}/ && name != "" { if (ma != "yes") print name; name = "" }' "$f" \
         | while read -r c; do echo "      ✗ client ${c} must set require_message_authenticator = yes [$(basename "$f")]"; done \
         | grep . && fail "clients without require_message_authenticator"
     done
@@ -300,7 +300,7 @@ test_static_network_client_secrets_come_from_environment() {
     local f
     for f in "${CLIENTS_FILES[@]}"; do
         awk '/^client / {name = $2} /^[[:space:]]*secret[[:space:]]*=/ {s = $0}
-             /^}/ && name != "" { if (name != "localhost" && s !~ /\$ENV\{/) print name; name = "" }' "$f" \
+             /^}/ && name != "" { if (s !~ /\$ENV\{/) print name; name = "" }' "$f" \
         | while read -r c; do echo "      ✗ client ${c} must read its secret from \$ENV{...} [$(basename "$f")]"; done \
         | grep . && fail "clients with literal secrets"
     done
@@ -574,10 +574,9 @@ EOF
     ${CLI} run --rm --entrypoint sh -v "${WORK}/pki:/pki" "${EAPOL_IMAGE}" /pki/make.sh >/dev/null || {
         echo "❌ Lab PKI generation failed" >&2; exit 1; }
 
-    # clients.conf.example as shipped; only the localhost secret is given a
-    # value so the file loads. Lab clients sit in its authenticator subnet.
-    sed -E "/client localhost/,/}/ s/secret = .*/secret = '$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)'/" \
-        "${REPO}/k8s/config/clients.conf.example" > "${WORK}/conf/clients.conf"
+    # clients.conf.example as shipped. Lab clients sit in its authenticator
+    # subnet; secrets come from the environment, as in the cluster.
+    cp "${REPO}/k8s/config/clients.conf.example" "${WORK}/conf/clients.conf"
     { cat "${REPO}/k8s/config/authorize.example"
       printf '\nclient-device-02\n    Tunnel-Type = VLAN,\n    Tunnel-Medium-Type = IEEE-802,\n    Tunnel-Private-Group-Id = "30"\n'
       # The APs' shared certificate CN, so a policy that keyed on it would show
