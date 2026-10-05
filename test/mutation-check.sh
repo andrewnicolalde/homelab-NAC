@@ -72,6 +72,9 @@ MUTATIONS=(
     "radsec-trusts-device-ca-without-issuer-pin|k8s/config/radsec|s#^( *ca_file = /etc/raddb/certs/)authenticators-ca\.pem#\1ca.pem#;/^ *check_cert_issuer = /d|test_both_radsec_refuses_device_certificates"
     # The radsec client list admits every source address
     "radsec-any-client-address|k8s/config/clients.conf.example|/^clients radsec/,/^}/ s#ipaddr = 10\.1\.0\.0/24#ipaddr = 0.0.0.0/0#|test_both_radsec_refuses_connections_from_unlisted_addresses"
+    # The plaintext warning must fire over UDP, and only over UDP
+    "no-plaintext-warning|k8s/config/check-eap-tls|/^ *cert_log_plaintext$/d|test_both_plaintext_radius_is_logged_as_a_warning"
+    "plaintext-warning-also-over-radsec|k8s/config/check-eap-tls|s/!= \"2083\"/!= \"0\"/|test_both_plaintext_radius_is_logged_as_a_warning"
     # Without the Called-Station-Id split, cert_log has no SSID to record
     "no-ssid-split|k8s/config/check-eap-tls|/^ *rewrite_called_station_id$/d|test_both_cert_log_records_the_ssid"
     "tls12-allowed-with-classical-group|k8s-pqc/config/eap|s/^( *tls_min_version = ).*/\1\"1.2\"/;s/^( *ecdh_curve = \")/\1secp384r1:/|test_pqc_tls12_is_rejected"

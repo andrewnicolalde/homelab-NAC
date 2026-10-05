@@ -386,15 +386,17 @@ test_static_servers_run_without_debug_output() {
 test_static_admission_log_records_only_allowlisted_fields() {
     expect_no_match "${CERT_LOG}" '^[^#]*%\{[^}]*(MPPE|Password|User-Name|EAP-Message|State)' \
         "cert_log formats must not include keys, passwords, claimed identities or EAP data"
-    expect_eq "$(grep -cE '^[[:space:]]*filename = /dev/stdout$' "${CERT_LOG}")" "2" \
-        "both cert_log instances must write to stdout"
+    expect_eq "$(grep -cE '^[[:space:]]*filename = /dev/stdout$' "${CERT_LOG}")" "$(grep -cE '^linelog ' "${CERT_LOG}")" \
+        "every cert_log instance must write to stdout"
 }
 
 # Which AP relayed each decision: its name (nas=, as the AP reports it) and the
 # address the request arrived from (src=, its own RadSec connection)
 test_static_admission_log_records_the_ap_name_and_address() {
-    expect_eq "$(grep -cF 'nas=\"%{outer.request:NAS-Identifier}\"' "${CERT_LOG}")" "2" "both lines log the AP name"
-    expect_eq "$(grep -cF 'src=%{outer.request:Packet-Src-IP-Address}' "${CERT_LOG}")" "2" "both lines log the source address"
+    local decisions
+    decisions=$(grep -E 'EAP-TLS (admitted|rejected)' "${CERT_LOG}")
+    expect_eq "$(echo "${decisions}" | grep -cF 'nas=\"%{outer.request:NAS-Identifier}\"')" "2" "both decision lines log the AP name"
+    expect_eq "$(echo "${decisions}" | grep -cF 'src=%{outer.request:Packet-Src-IP-Address}')" "2" "both decision lines log the source address"
 }
 
 # --- Kubernetes ---------------------------------------------------------------
@@ -982,6 +984,36 @@ test_both_cert_log_records_the_ssid() {
         expect_eq "$(echo "${line}" | sed -nE 's/.* ssid="([^"]*)".*/\1/p')" "ENTERPRISE-WIFI" "ssid= on the ${kind} line"
         expect_eq "$(echo "${line}" | sed -nE 's/.* called="([^"]*)".*/\1/p')" "${called}" "called= on the ${kind} line, unchanged"
     done
+}
+
+# Every EAP-TLS authentication that reaches the server over plain UDP RADIUS
+# logs a warning naming the client; over RadSec it must not
+test_both_plaintext_radius_is_logged_as_a_warning() {
+    local before after line i id=client-device-01
+    [ "${MODE}" = pqc ] && id=anonymous
+    before=$(server_log | grep -c 'WARNING: RADIUS over plaintext UDP')
+    eap dev01 "${id}"; expect_accept 10
+    for i in $(seq 20); do
+        line=$(server_log | grep 'WARNING: RADIUS over plaintext UDP' | tail -n1)
+        [ "$(server_log | grep -c 'WARNING: RADIUS over plaintext UDP')" -gt "${before}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c 'WARNING: RADIUS over plaintext UDP') - before ))" "1" "one warning for the UDP authentication"
+    expect_eq "$(echo "${line}" | sed -nE 's/.* client=([^ ]*) .*/\1/p')" "network_authenticators" "warning names the RADIUS client"
+    expect_eq "$(echo "${line}" | sed -nE 's/.* port=([0-9]+)\..*/\1/p')" "1812" "warning names the UDP port"
+    # Over RadSec: wait for this authentication's admission line, which is
+    # logged after the point where the warning would be, so a late warning
+    # cannot slip past the check
+    local admitted
+    before=$(server_log | grep -c 'WARNING: RADIUS over plaintext UDP')
+    admitted=$(server_log | grep -c "EAP-TLS admitted: .* src=${AP_IP} ")
+    eap dev01 "${id}" --via-radsec; expect_accept 10
+    for i in $(seq 20); do
+        [ "$(server_log | grep -c "EAP-TLS admitted: .* src=${AP_IP} ")" -gt "${admitted}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(( $(server_log | grep -c "EAP-TLS admitted: .* src=${AP_IP} ") - admitted ))" "1" "RadSec authentication logged"
+    expect_eq "$(( $(server_log | grep -c 'WARNING: RADIUS over plaintext UDP') - before ))" "0" "no warning over RadSec"
 }
 
 test_both_reauthentication_applies_the_policy_again() {

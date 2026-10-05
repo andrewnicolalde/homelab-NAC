@@ -23,6 +23,10 @@
 # split out by check-eap-tls) and the negotiated TLS parameters. The claimed
 # outer identity (User-Name) is left out: it is chosen by the supplicant, and
 # a newline in it would let a device forge log lines.
+#
+# cert_log_plaintext warns once per EAP-TLS authentication that arrived over
+# plain UDP RADIUS instead of RadSec (see sites/check-eap-tls), naming the
+# RADIUS client (from clients.conf) and the address it came from.
 # ==============================================================================
 linelog cert_log_admitted {
     filename = /dev/stdout
@@ -32,4 +36,9 @@ linelog cert_log_admitted {
 linelog cert_log_rejected {
     filename = /dev/stdout
     format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} src=%{outer.request:Packet-Src-IP-Address} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\""
+}
+
+linelog cert_log_plaintext {
+    filename = /dev/stdout
+    format = "%t : Auth: WARNING: RADIUS over plaintext UDP, not RadSec: client=%{client:shortname} src=%{outer.request:Packet-Src-IP-Address} nas=\"%{outer.request:NAS-Identifier}\" port=%{outer.request:Packet-Dst-Port}. The Wi-Fi session keys in its Access-Accept are protected only by the RADIUS shared secret"
 }

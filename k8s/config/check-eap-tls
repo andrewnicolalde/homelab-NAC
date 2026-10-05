@@ -31,6 +31,17 @@ server check-eap-tls {
         # unchanged. Logging only: nothing below depends on it.
         rewrite_called_station_id
 
+        # Warn when this authentication reached the server over plain UDP
+        # RADIUS rather than RadSec. Over UDP, the Access-Accept's Wi-Fi
+        # session keys (MS-MPPE) are protected (badly) only by the shared secret.
+        # Inside the container RadSec only ever arrives on port 2083
+        # (sites-enabled/radsec), so any other port means UDP. Logging only,
+        # and before the admission decision, so rejected devices are covered
+        # too.
+        if ("%{outer.request:Packet-Dst-Port}" != "2083") {
+            cert_log_plaintext
+        }
+
         # Discard VLAN attributes derived from the claimed User-Name.
         # EAP-TLS appends this server's reply to the outer reply rather than
         # replacing it, so anything the default site's lookup added must be
