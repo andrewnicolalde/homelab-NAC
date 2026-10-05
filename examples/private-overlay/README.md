@@ -51,6 +51,11 @@ configMapGenerator:
     files:
       - clients.conf=./clients.conf
       - authorize=./authorize
+  # Subject of your authenticator root CA, pinned by the RadSec listener
+  - name: freeradius-radsec
+    behavior: replace
+    literals:
+      - RADSEC_AUTHENTICATOR_ISSUER=/CN=Enterprise Authenticators Root CA
 
 # Replace the base Secrets with your RADIUS shared secrets and your actual
 # PKI certificates and private keys:
@@ -66,7 +71,26 @@ secretGenerator:
     files:
       - server.pem=./certs/radius-server/server.pem
       - ca.pem=./certs/user-client-devices/user_root_ca.crt
+      # Trust anchor for the access points' RadSec client certificate only
+      - authenticators-ca.pem=./certs/network-infrastructure-authenticators/authenticators_root_ca.crt
 ```
+
+### RadSec (RADIUS over TLS)
+
+Both servers also listen for RadSec on TCP 2083 (`k8s/config/radsec`), so access points can send RADIUS inside a mutually authenticated TLS 1.3 connection instead of over UDP. Add the access points to a separate `radsec` client list in your `clients.conf`, with the fixed secret `radsec`:
+
+```text
+# clients.conf
+clients radsec {
+    client authenticators_radsec {
+        ipaddr = 10.1.0.0/24
+        proto = tls
+        secret = radsec
+    }
+}
+```
+
+The listener trusts only `authenticators-ca.pem`, never the user-device CA, and pins its subject (`RADSEC_AUTHENTICATOR_ISSUER` above). In the access point's RADIUS profile, enable TLS, upload the RADIUS server root CA plus the authenticator certificate and key, use port 32083 (or 32093 for the post-quantum server) and the secret `radsec`.
 
 ### RADIUS shared secrets
 

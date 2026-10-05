@@ -58,6 +58,20 @@ MUTATIONS=(
     # which overrides ecdh_curve with P-384 (in TLS 1.3 too) and discards the
     # rest of the string, @SECLEVEL=4 included
     "suiteb192-pqc|k8s-pqc/config/eap|s/^( *cipher_list = \")[^:]*/\1SUITEB192/|test_pqc_every_classical_key_exchange_group_is_rejected|test_pqc_accepts_each_hybrid_group"
+    # RadSec listener (k8s/config/radsec): each control weakened in turn
+    "radsec-tls12-allowed|k8s/config/radsec|s/^( *tls_min_version = )\"1\.3\"/\1\"1.2\"/|test_both_radsec_tls12_is_rejected"
+    "radsec-chacha20-allowed|k8s/config/radsec|s/^( *cipher_suites = ).*/\1\"TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256\"/|test_both_radsec_non_cnsa_cipher_suites_are_rejected"
+    "radsec-mlkem-allowed|k8s/config/radsec|s/^( *ecdh_curve = ).*/\1\"secp384r1:X25519MLKEM768\"/|test_both_radsec_non_cnsa_groups_are_rejected"
+    "radsec-no-seclevel|k8s/config/radsec|s/:@SECLEVEL=4//|test_both_radsec_client_certificate_signed_with_sha256_is_rejected"
+    "radsec-no-client-cert-required|k8s/config/radsec|s/^( *require_client_cert = )yes/\1no/|test_both_radsec_requires_a_client_certificate"
+    # P-256 AP keys are refused by sigalgs_list and by @SECLEVEL=4
+    "radsec-no-sigalgs|k8s/config/radsec|/^ *sigalgs_list = /d|pass:test_both_radsec_client_signature_other_than_p384_is_rejected"
+    "radsec-no-sigalgs-or-seclevel|k8s/config/radsec|/^ *sigalgs_list = /d;s/:@SECLEVEL=4//|test_both_radsec_client_signature_other_than_p384_is_rejected"
+    # Device certificates are refused by the trust anchor and by the issuer pin
+    "radsec-trusts-device-ca|k8s/config/radsec|s#^( *ca_file = /etc/raddb/certs/)authenticators-ca\.pem#\1ca.pem#|pass:test_both_radsec_refuses_device_certificates"
+    "radsec-trusts-device-ca-without-issuer-pin|k8s/config/radsec|s#^( *ca_file = /etc/raddb/certs/)authenticators-ca\.pem#\1ca.pem#;/^ *check_cert_issuer = /d|test_both_radsec_refuses_device_certificates"
+    # The radsec client list admits every source address
+    "radsec-any-client-address|k8s/config/clients.conf.example|/^clients radsec/,/^}/ s#ipaddr = 10\.1\.0\.0/24#ipaddr = 0.0.0.0/0#|test_both_radsec_refuses_connections_from_unlisted_addresses"
     # Without the Called-Station-Id split, cert_log has no SSID to record
     "no-ssid-split|k8s/config/check-eap-tls|/^ *rewrite_called_station_id$/d|test_both_cert_log_records_the_ssid"
     "tls12-allowed-with-classical-group|k8s-pqc/config/eap|s/^( *tls_min_version = ).*/\1\"1.2\"/;s/^( *ecdh_curve = \")/\1secp384r1:/|test_pqc_tls12_is_rejected"

@@ -24,7 +24,8 @@
 # authorize and kustomization.yaml as well.
 #
 # Requirements for the functional tests: podman or docker, and the eapol_test
-# image built from test/Dockerfile with OpenSSL >= 3.5:
+# image built from test/Dockerfile with OpenSSL >= 3.5 and RadSec support
+# (CONFIG_RADIUS_TLS, set in the Dockerfile):
 #   podman build --build-arg ALPINE_VERSION=3.24.1 -t eapol-test:pqc -f test/Dockerfile test
 #
 # Usage: ./test/guarantees.sh [--static] [--only <regex>] [--keep]
@@ -62,6 +63,7 @@ KUSTOMIZE_BASE="${REPO}/k8s/kustomization.yaml"
 KUSTOMIZE_PQC="${REPO}/k8s-pqc/kustomization.yaml"
 CERT_VLAN="${REPO}/k8s/config/cert_vlan"
 CERT_LOG="${REPO}/k8s/config/cert_log"
+RADSEC_SITE="${REPO}/k8s/config/radsec"
 DEPLOY_CLASSICAL="${REPO}/k8s/01-deployment-test.yaml"
 DEPLOY_PQC="${REPO}/k8s-pqc/01-deployment-pqc.yaml"
 DOCKERFILE="${REPO}/docker/Dockerfile"
@@ -312,6 +314,63 @@ test_static_no_client_uses_the_stock_default_secret() {
     done
 }
 
+# --- RadSec -------------------------------------------------------------------
+
+test_static_radsec_listener_allows_only_tls13_cnsa_from_authenticators() {
+    local listen tls
+    listen=$(section_body "${RADSEC_SITE}" "listen")
+    tls=$(section_body "${RADSEC_SITE}" "    tls")
+    expect_eq "$(echo "${listen}" | conf_value port)" "2083" "RadSec port"
+    expect_eq "$(echo "${listen}" | conf_value proto)" "tcp" "RadSec transport"
+    expect_eq "$(echo "${listen}" | conf_value clients)" "radsec" "only the radsec client list"
+    expect_eq "$(echo "${tls}" | conf_value tls_min_version)" "1.3" "RadSec tls_min_version"
+    expect_eq "$(echo "${tls}" | conf_value tls_max_version)" "1.3" "RadSec tls_max_version"
+    expect_eq "$(echo "${tls}" | conf_value cipher_suites)" "TLS_AES_256_GCM_SHA384" "RadSec cipher_suites"
+    expect_eq "$(echo "${tls}" | conf_value cipher_list)" "ECDHE-ECDSA-AES256-GCM-SHA384:@SECLEVEL=4" "RadSec cipher_list"
+    expect_eq "$(echo "${tls}" | conf_value ecdh_curve)" "secp384r1" "RadSec ecdh_curve"
+    expect_eq "$(echo "${tls}" | conf_value sigalgs_list)" "ecdsa_secp384r1_sha384" "RadSec sigalgs_list"
+    expect_eq "$(echo "${tls}" | conf_value require_client_cert)" "yes" "RadSec require_client_cert"
+    expect_eq "$(echo "${tls}" | conf_value check_cert_issuer)" '$ENV{RADSEC_AUTHENTICATOR_ISSUER}' "RadSec check_cert_issuer"
+    expect_eq "$(echo "${tls}" | conf_value ca_file)" "/etc/raddb/certs/authenticators-ca.pem" "RadSec trusts only the authenticator CA"
+    echo "${tls}" | grep -Eq '^[[:space:]]*ca_path[[:space:]]*=' && fail "RadSec must not set ca_path (it would trust every CA in the directory)"
+    expect_eq "$(section_body "${RADSEC_SITE}" "        cache" | conf_value enable)" "no" "RadSec session cache must be disabled"
+}
+
+test_static_radsec_is_deployed_with_its_own_trust_anchor() {
+    local f
+    for f in "${DEPLOY_CLASSICAL}" "${DEPLOY_PQC}"; do
+        expect_match "$f" 'mountPath: /etc/raddb/sites-enabled/radsec$' "RadSec site mounted"
+        expect_match "$f" 'mountPath: /etc/raddb/certs/authenticators-ca.pem$' "authenticator CA mounted"
+        expect_match "$f" 'subPath: authenticators-ca.pem$' "authenticator CA mounted from its own Secret key"
+        expect_match "$f" 'name: freeradius-radsec$' "issuer pin loaded from the freeradius-radsec ConfigMap"
+    done
+    expect_match "${KUSTOMIZE_BASE}" '^      - radsec=./config/radsec$' "RadSec site in the base ConfigMap"
+    expect_match "${KUSTOMIZE_BASE}" 'authenticators-ca.pem=' "authenticator CA placeholder in the base Secret"
+    expect_match "${KUSTOMIZE_BASE}" 'RADSEC_AUTHENTICATOR_ISSUER=' "issuer placeholder in the base"
+    # Overlays replace the certs Secret, so each must supply the authenticator
+    # CA itself, from a file other than the user-device CA
+    for f in "${OVERLAY_FILES[@]}"; do
+        local ca auth
+        ca=$(sed -nE 's/^ *- ca\.pem=(.*)$/\1/p' "$f")
+        auth=$(sed -nE 's/^ *- authenticators-ca\.pem=(.*)$/\1/p' "$f")
+        [ -n "${auth}" ] || fail "overlay must map authenticators-ca.pem [$(basename "$f")]"
+        [ "${auth}" != "${ca}" ] || fail "authenticators-ca.pem must not be the user-device CA [$(basename "$f")]"
+        expect_match "$f" '^ *- RADSEC_AUTHENTICATOR_ISSUER=/' "overlay must set the issuer pin"
+    done
+}
+
+test_static_radsec_clients_use_tls_and_the_standard_secret() {
+    local f body
+    for f in "${CLIENTS_FILES[@]}"; do
+        body=$(section_body "$f" "clients radsec")
+        [ -n "${body}" ] || { fail "a 'clients radsec' list must exist [$(basename "$f")]"; continue; }
+        expect_eq "$(echo "${body}" | grep -cE '^[[:space:]]*client ')" "$(echo "${body}" | grep -cE '^[[:space:]]*proto[[:space:]]*=[[:space:]]*tls')" \
+            "every radsec client must set proto = tls [$(basename "$f")]"
+        echo "${body}" | grep -E '^[[:space:]]*secret[[:space:]]*=' | grep -vqE '=[[:space:]]*radsec$' \
+            && fail "radsec clients use the standard secret 'radsec' [$(basename "$f")]"
+    done
+}
+
 # --- Logging ------------------------------------------------------------------
 
 test_static_servers_run_without_debug_output() {
@@ -329,6 +388,13 @@ test_static_admission_log_records_only_allowlisted_fields() {
         "cert_log formats must not include keys, passwords, claimed identities or EAP data"
     expect_eq "$(grep -cE '^[[:space:]]*filename = /dev/stdout$' "${CERT_LOG}")" "2" \
         "both cert_log instances must write to stdout"
+}
+
+# Which AP relayed each decision: its name (nas=, as the AP reports it) and the
+# address the request arrived from (src=, its own RadSec connection)
+test_static_admission_log_records_the_ap_name_and_address() {
+    expect_eq "$(grep -cF 'nas=\"%{outer.request:NAS-Identifier}\"' "${CERT_LOG}")" "2" "both lines log the AP name"
+    expect_eq "$(grep -cF 'src=%{outer.request:Packet-Src-IP-Address}' "${CERT_LOG}")" "2" "both lines log the source address"
 }
 
 # --- Kubernetes ---------------------------------------------------------------
@@ -442,10 +508,23 @@ lab_setup() {
             echo "   Pull or build it (see this script's header), or set RADIUS_IMAGE / EAPOL_IMAGE." >&2
             exit 1; }
     done
+    local usage; usage=$(${CLI} run --rm "${EAPOL_IMAGE}" -h 2>&1)
+    echo "${usage}" | grep -q -- '-J<client cert>' || {
+        echo "❌ ${EAPOL_IMAGE} has no RadSec support (eapol_test -X TLS)." >&2
+        echo "   Rebuild it from test/Dockerfile, which sets CONFIG_RADIUS_TLS=y (see this script's header)." >&2
+        exit 1; }
     read -r -a RADIUSD_ARGS <<< "$(sed -nE 's/^ +args: *\[(.*)\].*$/\1/p' "${DEPLOY_CLASSICAL}" | tr -d '",')"
 
     WORK="$(mktemp -d "${TMPDIR:-/tmp}/guarantees.XXXXXX")"
     NET="guarantees-$$"; SRV="guarantees-radius-$$"; SRV_IP=10.1.0.10
+    # Fixed address for eapol_test when it stands in for an access point over
+    # RadSec, so the server's log can be checked for it (src=)
+    AP_IP=10.1.0.30
+    # A second lab network outside every client list (the radsec list and the
+    # UDP ones), which the server is also attached to
+    OUT_NET="guarantees-outside-$$"; OUT_SRV_IP=10.99.0.10; OUT_CLIENT_IP=10.99.0.30
+    # Subject of the lab authenticator CA, pinned by the RadSec listener
+    RADSEC_ISSUER="/CN=Lab Root CA - Network Authenticators"
     AUTH_SECRET="lab$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40)"
     TEST_SECRET="lab$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40)"
     trap lab_teardown EXIT
@@ -481,6 +560,13 @@ leaf other   client-device-01 other_ca
 CURVE=P-256; leaf dev01p256 client-device-01 user_ca; CURVE=P-384
 # Same device, CA and authorize entry as dev01, but signed by the CA with SHA-256
 DIGEST=sha256; leaf dev01sha256 client-device-01 user_ca; DIGEST=sha384
+# Access point RadSec client certificates: one shared by every AP, as UniFi
+# does, plus a P-256 copy and a copy the CA signed with SHA-256
+ca ap_ca "Lab Root CA - Network Authenticators"
+leaf ap lab-aps ap_ca
+cat ap.key ap.crt > ap.pem
+CURVE=P-256; leaf ap_p256 lab-aps ap_ca; CURVE=P-384
+DIGEST=sha256; leaf ap_sha256 lab-aps ap_ca; DIGEST=sha384
 chmod 644 ./*
 EOF
     ${CLI} run --rm --entrypoint sh -v "${WORK}/pki:/pki" "${EAPOL_IMAGE}" /pki/make.sh >/dev/null || {
@@ -491,7 +577,9 @@ EOF
     sed -E "/client localhost/,/}/ s/secret = .*/secret = '$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)'/" \
         "${REPO}/k8s/config/clients.conf.example" > "${WORK}/conf/clients.conf"
     { cat "${REPO}/k8s/config/authorize.example"
-      printf '\nclient-device-02\n    Tunnel-Type = VLAN,\n    Tunnel-Medium-Type = IEEE-802,\n    Tunnel-Private-Group-Id = "30"\n'; } \
+      printf '\nclient-device-02\n    Tunnel-Type = VLAN,\n    Tunnel-Medium-Type = IEEE-802,\n    Tunnel-Private-Group-Id = "30"\n'
+      # The APs' shared certificate CN, so a policy that keyed on it would show
+      printf '\nlab-aps\n    Tunnel-Type = VLAN,\n    Tunnel-Medium-Type = IEEE-802,\n    Tunnel-Private-Group-Id = "99"\n'; } \
         > "${WORK}/conf/authorize"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\n' "X25519:P-256" > "${WORK}/conf/cl-classical-groups.cnf"
     printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nSignatureAlgorithms = %s\n' "ECDSA+SHA256" > "${WORK}/conf/cl-sigalgs-sha256.cnf"
@@ -516,12 +604,31 @@ EOF
     done
     chmod 644 "${WORK}/conf/"*
 
+    # What a UniFi AP (U6-Mesh, firmware 6.8.2) offers when it opens a RadSec
+    # connection, as seen in the hardening plan's Phase 0. Its RADIUS client is
+    # hostapd (wpad) on OpenSSL 1.1.1, and hostapd sets no TLS policy beyond
+    # "no TLS 1.0 or 1.1", so the offer is OpenSSL 1.1.1's defaults: TLS 1.3
+    # and 1.2, AES-256-GCM and AES-128-GCM, these groups in this order, and a
+    # key share for x25519 only. eapol_test (hostapd's RADIUS client, built on
+    # OpenSSL 3.5) is shaped to send the same. One OpenSSL configuration covers
+    # both of eapol_test's roles, AP and device, so on the PQC server the
+    # device's hybrid group is appended to the list; the RadSec listener
+    # ignores it. Not reproduced: OpenSSL 3.5 also lists ML-DSA and brainpool
+    # signature algorithms, which 1.1.1 does not.
+    local ap_groups="X25519:P-256:X448:P-521:P-384"
+    printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\nCiphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256\n' \
+        "${ap_groups}" > "${WORK}/conf/cl-ap-classical.cnf"
+    printf 'openssl_conf = i\n[i]\nssl_conf = s\n[s]\nsystem_default = d\n[d]\nGroups = %s\nCiphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256\n' \
+        "${ap_groups}:X25519MLKEM768" > "${WORK}/conf/cl-ap-pqc.cnf"
+    chmod 644 "${WORK}/conf/"cl-ap-*.cnf
+
     ${CLI} network create --subnet 10.1.0.0/24 "${NET}" >/dev/null
+    ${CLI} network create --subnet 10.99.0.0/24 "${OUT_NET}" >/dev/null
 }
 
 lab_teardown() {
     ${CLI} rm -f "${SRV}" >/dev/null 2>&1 || true
-    ${CLI} network rm "${NET}" >/dev/null 2>&1 || true
+    ${CLI} network rm "${NET}" "${OUT_NET}" >/dev/null 2>&1 || true
     if [ "${KEEP}" = true ]; then echo "Work directory kept: ${WORK}"; else rm -rf "${WORK}"; fi
 }
 
@@ -531,6 +638,9 @@ start_server() { # classical|pqc
     ${CLI} rm -f "${SRV}" >/dev/null 2>&1
     ${CLI} run -d --name "${SRV}" --network "${NET}" --ip "${SRV_IP}" \
         -e RADIUS_SECRET_AUTHENTICATORS="${AUTH_SECRET}" -e RADIUS_SECRET_TEST="${TEST_SECRET}" \
+        -e RADSEC_AUTHENTICATOR_ISSUER="${RADSEC_ISSUER}" \
+        -v "${WORK}/pki/ap_ca.crt:/etc/raddb/certs/authenticators-ca.pem:ro" \
+        -v "${RADSEC_SITE}:/etc/raddb/sites-enabled/radsec:ro" \
         -v "${WORK}/pki/user_ca.crt:/etc/raddb/certs/ca.pem:ro" \
         -v "${WORK}/pki/server.pem:/etc/raddb/certs/server.pem:ro" \
         -v "${RADIUSD_CONF}:/etc/raddb/radiusd.conf:ro" \
@@ -541,6 +651,7 @@ start_server() { # classical|pqc
         -v "${CERT_VLAN}:/etc/raddb/mods-enabled/cert_vlan:ro" \
         -v "${CERT_LOG}:/etc/raddb/mods-enabled/cert_log:ro" \
         "${RADIUS_IMAGE}" "${RADIUSD_ARGS[@]}" >/dev/null
+    ${CLI} network connect --ip "${OUT_SRV_IP}" "${OUT_NET}" "${SRV}" >/dev/null
     local i
     for i in $(seq 60); do
         server_log | grep -c "Ready to process requests" >/dev/null && { EAP_SUCCESSES=0; return 0; }
@@ -561,12 +672,14 @@ server_log() { local log; log=$(${CLI} logs "${SRV}" 2>&1); printf '%s\n' "${log
 #   --secret <secret>                 shared secret (default: the lab secret)
 #   --reauth                          authenticate twice in one run
 #   --called <AP MAC>:<SSID>          send this Called-Station-Id, as an AP does
+#   --via-radsec                      as an access point would: RadSec to port 2083
+#                                     with the lab AP certificate and an AP's TLS offer
 # Sets EAP_RESULT (SUCCESS|FAILURE), EAP_VLANS (VLANs in the final
 # Access-Accept, comma-separated), EAP_USER (its User-Name), EAP_OUT (file)
 # ------------------------------------------------------------------------------
 EAP_N=0
 eap() {
-    local cert=$1 identity=$2 tls=default groups="" secret="${AUTH_SECRET}" extra=()
+    local cert=$1 identity=$2 tls=default groups="" secret="${AUTH_SECRET}" extra=() radsec=false
     shift 2
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -575,6 +688,7 @@ eap() {
             --secret) secret=$2; shift 2 ;;
             --reauth) extra+=(-r1); shift ;;
             --called) extra+=(-N"30:s:$2"); shift 2 ;;   # Called-Station-Id
+            --via-radsec) radsec=true; shift ;;
         esac
     done
     [ "${tls}" = default ] && { [ "${MODE}" = pqc ] && tls=tls13 || tls=tls12; }
@@ -609,11 +723,16 @@ eap() {
     } > "${conf}"
     chmod 644 "${conf}"
 
-    local env=()
+    local env=() port=1812 net=()
     [ -n "${groups}" ] && env=(-e "OPENSSL_CONF=/conf/cl-${groups}.cnf")
-    ${CLI} run --rm --network "${NET}" ${env[@]+"${env[@]}"} \
+    if [ "${radsec}" = true ]; then
+        port=2083; secret=radsec; net=(--ip "${AP_IP}")
+        env=(-e "OPENSSL_CONF=/conf/cl-ap-${MODE}.cnf")
+        extra+=(-X TLS -j /pki/server_ca.crt -J /pki/ap.crt -k /pki/ap.key)
+    fi
+    ${CLI} run --rm --network "${NET}" ${net[@]+"${net[@]}"} ${env[@]+"${env[@]}"} \
         -v "${WORK}/pki:/pki:ro" -v "${WORK}/conf:/conf:ro" "${EAPOL_IMAGE}" \
-        -c "/conf/$(basename "${conf}")" -a "${SRV_IP}" -p 1812 -s "${secret}" \
+        -c "/conf/$(basename "${conf}")" -a "${SRV_IP}" -p "${port}" -s "${secret}" \
         -M 02:00:00:00:00:01 -t 15 ${extra[@]+"${extra[@]}"} > "${EAP_OUT}" 2>&1
     EAP_RESULT=$(grep -E '^(SUCCESS|FAILURE)$' "${EAP_OUT}" | tail -n1)
     EAP_RESULT=${EAP_RESULT:-FAILURE}
@@ -697,6 +816,42 @@ offered_groups() {
     done
     (IFS=,; echo "${out[*]}")
 }
+# Data of one extension (hex type, e.g. 002b) in the client's first
+# ClientHello, as space-separated hex bytes
+hello_ext() {
+    local b i end type len
+    read -r -a b <<< "$(hello_bytes 'TX ver=.*\(handshake/client hello\)')"
+    [ ${#b[@]} -gt 40 ] || return 0
+    i=$((39 + 16#${b[38]}))
+    i=$((i + 2 + 16#${b[i]} * 256 + 16#${b[i+1]}))
+    i=$((i + 1 + 16#${b[i]}))
+    end=$((i + 2 + 16#${b[i]} * 256 + 16#${b[i+1]})); i=$((i + 2))
+    while [ "${i}" -lt "${end}" ]; do
+        type="${b[i]}${b[i+1]}"; len=$((16#${b[i+2]} * 256 + 16#${b[i+3]})); i=$((i + 4))
+        [ "${type}" = "$1" ] && { echo "${b[*]:i:len}"; return 0; }
+        i=$((i + len))
+    done
+}
+# TLS versions in the client's first ClientHello (supported_versions)
+offered_versions() {
+    local d out=() k v
+    read -r -a d <<< "$(hello_ext 002b)"
+    for (( k = 1; k < 1 + 16#${d[0]:-0}; k += 2 )); do
+        v="${d[k]}${d[k+1]}"
+        case "${v}" in 0304) out+=("TLS 1.3") ;; 0303) out+=("TLS 1.2") ;; *) out+=("0x${v}") ;; esac
+    done
+    (IFS=,; echo "${out[*]}")
+}
+# Groups the client sent key shares for in its first ClientHello
+offered_key_shares() {
+    local d out=() k=2
+    read -r -a d <<< "$(hello_ext 0033)"
+    while [ "${k}" -lt "${#d[@]}" ]; do
+        out+=("$(group_name "${d[k]}${d[k+1]}")")
+        k=$((k + 4 + 16#${d[k+2]} * 256 + 16#${d[k+3]}))
+    done
+    (IFS=,; echo "${out[*]}")
+}
 # Cipher suite chosen in the ServerHello the client received
 server_hello_suite() {
     local b i
@@ -713,6 +868,48 @@ expect_negotiated() { # version suite: as seen by the client and by the server
     expect_eq "$(server_hello_suite)" "$2" "client: cipher suite in the ServerHello"
     expect_eq "$(echo "${line}" | sed -nE 's/.* tls="([^"]*)".*/\1/p')" "$1" "server: TLS version in cert_log"
     expect_eq "$(echo "${line}" | sed -nE 's/.* cipher=([^ ]*).*/\1/p')" "$2" "server: cipher suite in cert_log"
+}
+
+# ------------------------------------------------------------------------------
+# radsec_connect <cert|none> [openssl s_client args]: one TLS connection to the
+# server's RadSec port, presenting /pki/<cert>.crt as an access point would.
+# The client keeps the connection open for 2 s: in TLS 1.3 the server checks
+# the client certificate only after the client's Finished, when the client
+# already considers the handshake complete. FreeRADIUS then drops a refused
+# connection without the client receiving its alert, so the verdict, and the
+# reason for it, come from the server's log.
+# Sets RADSEC_OUT (the client's output) and RADSEC_SERVER (the server's TLS
+# log lines since the connection started). Set RADSEC_FROM=outside to connect
+# from the lab network outside every client list.
+# ------------------------------------------------------------------------------
+radsec_connect() {
+    local cert=$1 before i net=(--network "${NET}") host=${SRV_IP}; shift
+    [ "${RADSEC_FROM:-}" = outside ] && { net=(--network "${OUT_NET}" --ip "${OUT_CLIENT_IP}"); host=${OUT_SRV_IP}; }
+    local args=(-connect "${host}:2083" -CAfile /pki/server_ca.crt -verify_return_error)
+    [ "${cert}" != none ] && args+=(-cert "/pki/${cert}.crt" -key "/pki/${cert}.key")
+    before=$(server_log | wc -l)
+    RADSEC_OUT=$(${CLI} run --rm "${net[@]}" --entrypoint sh -v "${WORK}/pki:/pki:ro" "${EAPOL_IMAGE}" \
+        -c 'sleep 2 | openssl s_client "$@" 2>&1' sh "${args[@]}" "$@" 2>&1)
+    for i in $(seq 20); do
+        RADSEC_SERVER=$(server_log | tail -n +$((before + 1)) | grep -E 'RADIUS/TLS|OpenSSL says|Certificate issuer|unknown client')
+        echo "${RADSEC_OUT}" | grep -q '^DONE$' && break
+        echo "${RADSEC_SERVER}" | grep -qE 'Alert write:fatal|unknown client' && break
+        sleep 0.25
+    done
+}
+# Strict CNSA 1.0 on TLS 1.3, and the connection still open 2 s later
+expect_radsec_accepted() {
+    expect_eq "$(echo "${RADSEC_OUT}" | sed -nE 's/^New, (TLSv[0-9.]+), Cipher is .*/\1/p')" "TLSv1.3" "client: TLS version"
+    expect_eq "$(echo "${RADSEC_OUT}" | sed -nE 's/^New, TLSv[0-9.]+, Cipher is //p')" "TLS_AES_256_GCM_SHA384" "client: cipher suite"
+    expect_eq "$(echo "${RADSEC_OUT}" | sed -nE 's/^Peer Temp Key: ECDH, ([^,]*),.*/\1/p')" "secp384r1" "client: key exchange group"
+    expect_eq "$(echo "${RADSEC_OUT}" | sed -nE 's/^Peer signature type: //p')" "ecdsa_secp384r1_sha384" "client: the server's signature"
+    expect_eq "$(echo "${RADSEC_OUT}" | grep -c '^DONE$')" "1" "client: connection still open after 2 s, then closed by the client"
+    expect_eq "$(echo "${RADSEC_SERVER}" | grep -c 'Alert write:fatal')" "0" "server: no TLS alert"
+}
+expect_radsec_refused() { # extended regex for the reason in the server's log
+    expect_eq "$(echo "${RADSEC_OUT}" | grep -c '^DONE$')" "0" "client: connection dropped by the server"
+    echo "${RADSEC_SERVER}" | grep -qE -- "$1" \
+        || fail "server: expected '$1' in its log, got: $(echo "${RADSEC_SERVER}" | tr '\n' '|')"
 }
 
 # ==============================================================================
@@ -800,6 +997,121 @@ test_both_reauthentication_applies_the_policy_again() {
 test_both_tls_negotiation_below_policy_is_rejected() {
     eap dev01 client-device-01 --tls weak; expect_reject
     eap dev01 client-device-01 --groups classical-groups; expect_reject
+}
+
+# ==============================================================================
+# Functional tests: RadSec, both servers (sites-enabled/radsec)
+# The access points' link: strict CNSA 1.0 on TLS 1.3 only, AP certificates only
+# ==============================================================================
+
+# eapol_test opens the RadSec connection itself, with hostapd's RADIUS client
+# (the implementation family the UniFi APs use: hostapd on OpenSSL 1.1.1t),
+# the lab AP certificate and an AP's TLS offer (see cl-ap-*.cnf in lab_setup).
+# The first ClientHello in its log is the RadSec one; EAP starts only once the
+# RadSec connection is up. EAP-TLS completing over it is the definitive check
+# that an accepted RadSec connection carries RADIUS, and src= records the AP's
+# own address.
+test_both_radsec_registered_device_gets_its_vlan() {
+    local id=client-device-01 groups="X25519,P-256,X448,P-521,P-384" line i
+    [ "${MODE}" = pqc ] && { id=anonymous; groups="${groups},X25519MLKEM768"; }
+    eap dev01 "${id}" --via-radsec
+    expect_eq "$(offered_versions)" "TLS 1.3,TLS 1.2" "RadSec client offered the AP's TLS versions"
+    expect_eq "$(offered_tls13_suites)" "TLS_AES_256_GCM_SHA384,TLS_AES_128_GCM_SHA256" "RadSec client offered the AP's TLS 1.3 cipher suites"
+    expect_eq "$(offered_groups)" "${groups}" "RadSec client offered the AP's groups"
+    expect_eq "$(offered_key_shares)" "X25519" "RadSec client sent the AP's key share (the server must ask for P-384)"
+    expect_eq "$(grep -c 'RADIUS: TLS connection established' "${EAP_OUT}")" "1" "RadSec connection established"
+    expect_accept 10 client-device-01
+    for i in $(seq 20); do
+        line=$(server_log | grep 'EAP-TLS admitted' | grep -F " src=${AP_IP} " | tail -n1)
+        [ -n "${line}" ] && break
+        sleep 0.25
+    done
+    expect_eq "$(echo "${line}" | sed -nE 's/.* cn="([^"]*)".*/\1/p')" "client-device-01" \
+        "admission logged with the AP's address (src=${AP_IP})"
+}
+
+# The APs' shared certificate CN (lab-aps) has an authorize entry, VLAN 99. A
+# policy keyed on the authenticator's certificate instead of the device's
+# would admit this unregistered device, or give a registered one VLAN 99.
+test_both_radsec_vlan_never_comes_from_the_ap_certificate() {
+    eap dev99 client-device-99 --via-radsec; expect_reject
+    eap dev02 client-device-02 --via-radsec; expect_accept 30 client-device-02
+}
+
+# The client offers everything: TLS 1.2 and 1.3, OpenSSL's default cipher
+# suites and groups (key shares for X25519MLKEM768 and X25519 first). The
+# server must choose CNSA 1.0, not merely accept it.
+test_both_radsec_negotiates_exactly_cnsa_1_0() {
+    radsec_connect ap
+    expect_radsec_accepted
+}
+
+test_both_radsec_tls12_is_rejected() {
+    radsec_connect ap -tls1_2 -cipher ECDHE-ECDSA-AES256-GCM-SHA384
+    expect_radsec_refused 'Alert write:fatal:protocol version'
+}
+
+test_both_radsec_non_cnsa_cipher_suites_are_rejected() {
+    radsec_connect ap -tls1_3 -ciphersuites TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256
+    expect_radsec_refused 'Alert write:fatal:handshake failure'
+}
+
+# Includes a hybrid ML-KEM group, because strict CNSA 1.0 allows only P-384.
+# Refusing ML-KEM here is a temporary limit of the APs, not a goal: their
+# RadSec client (hostapd on UniFi firmware 6.8.2) offers no ML-KEM group. A
+# hybrid ML-KEM group on this link would improve security against quantum
+# attackers: the Wi-Fi session keys (MS-MPPE) travel over RadSec, so someone
+# recording the link today could decrypt them, and then the Wi-Fi traffic
+# they protect, once a quantum computer exists. A hybrid group would keep
+# P-384's classical protection too. When an AP firmware update offers one,
+# switch the RadSec ecdh_curve to it (preferably SecP384r1MLKEM1024) and
+# update this test in the same change.
+test_both_radsec_non_cnsa_groups_are_rejected() {
+    radsec_connect ap -groups X25519:P-256:X25519MLKEM768
+    expect_radsec_refused 'Alert write:fatal:handshake failure'
+}
+
+# ap_p256 matches ap in everything (CA, CN) except its P-256 key. ap runs first
+# as a control, so the refusal can only be for the key.
+test_both_radsec_client_signature_other_than_p384_is_rejected() {
+    radsec_connect ap; expect_radsec_accepted
+    radsec_connect ap_p256; expect_radsec_refused 'Alert write:fatal'
+}
+
+# Only the 192-bit security level (@SECLEVEL=4) checks the signature ON the
+# AP's certificate
+test_both_radsec_client_certificate_signed_with_sha256_is_rejected() {
+    radsec_connect ap_sha256
+    expect_radsec_refused 'error 68 : CA signature digest algorithm too weak'
+}
+
+test_both_radsec_requires_a_client_certificate() {
+    radsec_connect none
+    expect_radsec_refused 'Alert write:fatal'
+}
+
+# A Wi-Fi device certificate (user CA) must never open a RadSec connection.
+# Refused by the trust anchor (authenticators-ca.pem only) and, failing that,
+# by the issuer pin (check_cert_issuer).
+test_both_radsec_refuses_device_certificates() {
+    radsec_connect dev01
+    expect_radsec_refused 'Alert write:fatal'
+}
+
+test_both_radsec_refuses_certificates_from_an_untrusted_ca() {
+    radsec_connect other
+    expect_radsec_refused 'Alert write:fatal:unknown CA'
+}
+
+# Only addresses in the 'radsec' client list may connect, even with a valid AP
+# certificate. FreeRADIUS checks the source address when it accepts the TCP
+# connection and closes it before any TLS. The same certificate from the AP
+# subnet runs first as a control.
+test_both_radsec_refuses_connections_from_unlisted_addresses() {
+    radsec_connect ap; expect_radsec_accepted
+    RADSEC_FROM=outside radsec_connect ap
+    expect_eq "$(echo "${RADSEC_OUT}" | grep -c '^New, TLSv')" "0" "client: no TLS session from an unlisted address"
+    expect_radsec_refused "unknown client ${OUT_CLIENT_IP} port [0-9]+ proto tcp"
 }
 
 # ==============================================================================

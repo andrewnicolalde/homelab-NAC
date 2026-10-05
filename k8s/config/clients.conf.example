@@ -25,6 +25,21 @@ client network_authenticators {
     nas_type = other
 }
 
+# 2b. The same authenticators over RadSec (TCP 2083, sites-enabled/radsec).
+# Only the RadSec listener reads this list ('clients = radsec'); the UDP
+# listeners use the clients above. The address must match the AP's real
+# source address, which the Service preserves (externalTrafficPolicy: Local).
+# "radsec" is the fixed secret the RadSec standard prescribes: the TLS
+# connection, with the AP's certificate, protects the traffic instead.
+clients radsec {
+    client authenticators_radsec {
+        ipaddr = 10.1.0.0/24
+        proto = tls
+        secret = radsec
+        nas_type = other
+    }
+}
+
 # 3. Test Runner / Management Subnet (for testing EAP-TLS directly via eapol_test)
 client workstation_test {
     ipaddr = 10.10.10.0/24

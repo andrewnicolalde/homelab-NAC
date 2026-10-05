@@ -12,6 +12,11 @@
 # which device was admitted, so these lines do, logging only the fields named
 # below.
 #
+# src= is the address the request arrived from: over RadSec, the AP's own TCP
+# connection, so it records which AP relayed a request even though every AP
+# presents the same certificate. nas= and called= are what the AP says about
+# itself; src= backs them up.
+#
 # Only authenticated or server-side values are logged: the certificate fields
 # (signed by the trusted CA), attributes set by the authenticator (protected
 # by the RADIUS shared secret; ssid= is the SSID part of Called-Station-Id,
@@ -21,10 +26,10 @@
 # ==============================================================================
 linelog cert_log_admitted {
     filename = /dev/stdout
-    format = "%t : Auth: EAP-TLS admitted: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" vlan=%{reply:Tunnel-Private-Group-Id} mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\" tls=\"%{outer.session-state:TLS-Session-Version}\" cipher=%{outer.session-state:TLS-Session-Cipher-Suite}"
+    format = "%t : Auth: EAP-TLS admitted: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" vlan=%{reply:Tunnel-Private-Group-Id} mac=%{outer.request:Calling-Station-Id} src=%{outer.request:Packet-Src-IP-Address} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\" tls=\"%{outer.session-state:TLS-Session-Version}\" cipher=%{outer.session-state:TLS-Session-Cipher-Suite}"
 }
 
 linelog cert_log_rejected {
     filename = /dev/stdout
-    format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\""
+    format = "%t : Auth: EAP-TLS rejected, no authorize entry for certificate: cn=\"%{TLS-Client-Cert-Common-Name}\" serial=%{TLS-Client-Cert-Serial} issuer=\"%{TLS-Client-Cert-Issuer}\" mac=%{outer.request:Calling-Station-Id} src=%{outer.request:Packet-Src-IP-Address} nas=\"%{outer.request:NAS-Identifier}\" called=\"%{outer.request:Called-Station-Id}\" ssid=\"%{Called-Station-SSID}\""
 }

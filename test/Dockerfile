@@ -21,11 +21,15 @@ ARG WPA_SUPPLICANT_VERSION=2.12
 # Copy vendored upstream source archive which forms part of this repo for deterministic offline builds
 COPY wpa_supplicant-${WPA_SUPPLICANT_VERSION}.tar.gz /build/
 
+# CONFIG_RADIUS_TLS adds RADIUS over TLS (RadSec) to eapol_test (-X TLS, with
+# -j/-J/-k for the CA, client certificate and key): hostapd's RADIUS client,
+# so the tests can stand in for an access point's RadSec connection.
 RUN tar -xzf wpa_supplicant-${WPA_SUPPLICANT_VERSION}.tar.gz && \
     cd wpa_supplicant-${WPA_SUPPLICANT_VERSION}/wpa_supplicant && \
     cp defconfig .config && \
     echo "CONFIG_EAPOL_TEST=y" >> .config && \
     echo "CONFIG_SUITEB192=y" >> .config && \
+    echo "CONFIG_RADIUS_TLS=y" >> .config && \
     make -j$(nproc) eapol_test && \
     install -m 755 eapol_test /usr/local/bin/eapol_test
 

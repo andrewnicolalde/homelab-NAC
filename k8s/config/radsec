@@ -1,0 +1,128 @@
+# ==============================================================================
+# FreeRADIUS Site (sites-enabled/radsec)
+# RadSec (RADIUS over TLS, RFC 6614) listener for the access points
+# ==============================================================================
+# Shared by the classical (k8s/) and post-quantum (k8s-pqc/) deployments: the
+# APs reach both servers over the same classical TLS profile, because their
+# RadSec client (hostapd) offers no post-quantum key exchange. The PQC
+# server's ML-KEM settings live in its EAP config only, which this listener
+# never reads: each tls {} block gets its own TLS context.
+#
+# RadSec wraps the APs' RADIUS traffic, including the Wi-Fi session keys
+# (MS-MPPE) in each Access-Accept, in a mutually authenticated TLS connection.
+# Over UDP those keys are protected only by the shared secret.
+#
+# Requests arriving here are handled by the default site, exactly like those
+# arriving over UDP: EAP-TLS, then the check-eap-tls admission policy.
+# ==============================================================================
+listen {
+    ipaddr = *
+    port = 2083
+    proto = tcp
+    type = auth+acct
+    virtual_server = default
+
+    # Only the clients in the 'radsec' list (clients.conf) may connect, and
+    # they are matched on their source address. Their secret is the fixed
+    # value "radsec" that the RadSec standard prescribes: the TLS connection,
+    # not the secret, protects the traffic.
+    clients = radsec
+
+    # FreeRADIUS's sample values. Each AP holds one long-lived connection and
+    # reconnects after an idle close.
+    limit {
+        max_connections = 16
+        lifetime = 0
+        idle_timeout = 30
+    }
+
+    tls {
+        # How these settings map onto the TLS handshake, and what each one
+        # governs, is explained in mods-enabled/eap. The values here follow
+        # CNSA 1.0 on TLS 1.3 (RFC 9151). Every value is set explicitly: the
+        # sample RadSec site allows TLS 1.2 and leaves ecdh_curve empty.
+
+        # --- Certificates and trust -------------------------------------------
+
+        # The same server certificate as EAP. The APs check only that it
+        # chains to the RADIUS server root CA uploaded to their RADIUS
+        # profile; they check no names.
+        private_key_file = /etc/raddb/certs/server.pem
+        certificate_file = /etc/raddb/certs/server.pem
+
+        # The trust anchor for the APs: the authenticator root CA ONLY, in its
+        # own file. It must never contain the user-device CA (ca.pem), or a
+        # Wi-Fi device certificate could open a RadSec connection. ca_path is
+        # deliberately left unset, so nothing else is trusted.
+        ca_file = /etc/raddb/certs/authenticators-ca.pem
+
+        # Every AP must present a certificate. Without this, the server would
+        # not even ask for one, and anything at an address in the 'radsec'
+        # client list could connect anonymously.
+        require_client_cert = yes
+
+        # The AP certificate must have been issued by exactly this CA (the
+        # subject of the authenticator root CA, e.g. "/CN=<CA name>"). A
+        # backstop against the wrong CA file being trusted. The value is
+        # site-specific, so it comes from the environment (the
+        # freeradius-radsec ConfigMap); FreeRADIUS refuses to start if it is
+        # unset.
+        check_cert_issuer = "$ENV{RADSEC_AUTHENTICATOR_ISSUER}"
+
+        # --- Protocol version -------------------------------------------------
+
+        # TLS 1.3 only, on both servers. No other version is ever allowed on a
+        # RadSec connection.
+        tls_min_version = "1.3"
+        tls_max_version = "1.3"
+
+        # --- Cipher suite -----------------------------------------------------
+
+        cipher_suites = "TLS_AES_256_GCM_SHA384"
+
+        # --- Key exchange -----------------------------------------------------
+
+        # P-384 only, as CNSA 1.0 requires.
+        #
+        # Refusing ML-KEM here is a (hopefully) temporary limit of the APs, not a goal:
+        # their RadSec client (hostapd on UniFi firmware 6.8.2) offers no
+        # ML-KEM group. A hybrid ML-KEM group on this link would improve
+        # security against quantum attackers. The Wi-Fi session keys (MS-MPPE)
+        # travel over this connection, so someone recording it today could
+        # decrypt them, and then the Wi-Fi traffic they protect, once a quantum
+        # computer exists. A hybrid group would keep P-384's classical
+        # protection too. When an AP firmware update offers one (re-check the
+        # AP's ClientHello after each update), switch to it, preferably
+        # SecP384r1MLKEM1024, and update
+        # test_both_radsec_non_cnsa_groups_are_rejected in the same change.
+        ecdh_curve = "secp384r1"
+
+        # When both sides support several options, use the server's order.
+        cipher_server_preference = yes
+
+        # --- Handshake signatures ---------------------------------------------
+
+        # ECDSA on P-384 with SHA-384, for the server's signature and for the
+        # AP's CertificateVerify. An AP certificate on another curve is
+        # refused.
+        sigalgs_list = "ecdsa_secp384r1_sha384"
+
+        # --- Security level ---------------------------------------------------
+
+        # OpenSSL's 192-bit security level, the only control that checks the
+        # signatures ON the AP's certificate chain (an AP certificate its CA
+        # signed with SHA-256 is refused). The suite name before it is a TLS
+        # 1.2 suite, never used here; OpenSSL requires the string to name one.
+        # NEVER put a Suite B keyword (SUITEB128, SUITEB192) in this string: it
+        # discards the rest of the string, @SECLEVEL=4 included.
+        cipher_list = "ECDHE-ECDSA-AES256-GCM-SHA384:@SECLEVEL=4"
+
+        # --- Session resumption -----------------------------------------------
+
+        # Off: every connection proves its certificate again.
+        cache {
+            # TODO: Can we safely enable this? What are the benefits associated with doing so?
+            enable = no
+        }
+    }
+}

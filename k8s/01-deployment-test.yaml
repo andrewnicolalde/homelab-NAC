@@ -50,6 +50,9 @@ spec:
             # RADIUS client shared secrets, referenced from clients.conf as $ENV{...}
             - secretRef:
                 name: freeradius-client-secrets
+            # Subject of the authenticator root CA, pinned by sites-enabled/radsec
+            - configMapRef:
+                name: freeradius-radsec
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -80,6 +83,12 @@ spec:
               mountPath: /etc/raddb/certs/server.pem
               subPath: server.pem
               readOnly: true
+            # Trust anchor for the access points' RadSec client certificate,
+            # kept apart from the user-device CA in ca.pem
+            - name: certs
+              mountPath: /etc/raddb/certs/authenticators-ca.pem
+              subPath: authenticators-ca.pem
+              readOnly: true
             - name: config
               mountPath: /etc/raddb/clients.conf
               subPath: clients.conf
@@ -105,6 +114,11 @@ spec:
             - name: config
               mountPath: /etc/raddb/mods-enabled/cert_log
               subPath: cert_log
+              readOnly: true
+            # RadSec (RADIUS over TLS) listener for the access points, on 2083
+            - name: config
+              mountPath: /etc/raddb/sites-enabled/radsec
+              subPath: radsec
               readOnly: true
       volumes:
         - name: certs

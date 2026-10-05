@@ -19,6 +19,8 @@ secretGenerator:
     literals:
       - ca.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
       - server.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
+      # Root CA of the access points' RadSec client certificate (only)
+      - authenticators-ca.pem="PLACEHOLDER_REPLACE_IN_OVERLAY"
 
 configMapGenerator:
   - name: freeradius-config
@@ -32,3 +34,11 @@ configMapGenerator:
       - check-eap-tls=./config/check-eap-tls
       - cert_vlan=./config/cert_vlan
       - cert_log=./config/cert_log
+      # RadSec listener for the access points (also mounted by ../k8s-pqc)
+      - radsec=./config/radsec
+  # Subject of the authenticator root CA, pinned by the RadSec listener
+  # (check_cert_issuer), e.g. "/CN=<CA name>". Loaded as an environment
+  # variable. Replace in your overlay.
+  - name: freeradius-radsec
+    literals:
+      - RADSEC_AUTHENTICATOR_ISSUER=PLACEHOLDER_REPLACE_IN_OVERLAY
